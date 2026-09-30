@@ -34,9 +34,17 @@ def main() -> int:
         print("Logged out.")
         return 0
 
+    import logging
+
+    cfg = config.load()
+    # A small log in the private /tmp folder, rewritten on every start: enough to tell what
+    # happened in the last run without piling up.
+    logging.basicConfig(filename=config.media_dir() / "pupila.log", filemode="w", level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
+
     from .app import Pupila  # imports textual-image, which asks the terminal before starting
 
-    Pupila(config.load()).run()
+    Pupila(cfg).run()
     return 0
 
 

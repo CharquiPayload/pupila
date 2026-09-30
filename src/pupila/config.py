@@ -214,6 +214,22 @@ def downloads_dir() -> Path:
     return Path.home() / "Downloads"
 
 
+UI_FILE = STATE_DIR / "ui.json"
+
+
+def load_ui() -> dict:
+    """Small things the interface remembers between runs (the sidebar hidden or not)."""
+    try:
+        return json.loads(UI_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_ui(changes: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    UI_FILE.write_text(json.dumps({**load_ui(), **changes}))
+
+
 def read_session() -> dict | None:
     try:
         return json.loads(SESSION_FILE.read_text())

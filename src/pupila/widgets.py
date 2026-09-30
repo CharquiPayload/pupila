@@ -161,9 +161,13 @@ class MessageView(Vertical):
         self.call_after_refresh(self._swap_avatar)
 
     async def _swap_avatar(self) -> None:
-        if not self.is_mounted:
+        url = self._avatar_url()
+        photo = self.pupila.images.get("avatar:" + url) if url else None
+        if not self.is_mounted or photo is None:
             return
         for slot in self.query(".avatar-slot"):
+            if any(getattr(c, "_image", None) is photo for c in slot.children):
+                continue  # already showing it
             await slot.remove_children()
             await slot.mount(self._avatar())
 

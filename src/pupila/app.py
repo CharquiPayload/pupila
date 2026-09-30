@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import mimetypes
 import shutil
 import subprocess
@@ -23,7 +24,7 @@ from textual.containers import Horizontal, Vertical
 from textual.theme import Theme
 from textual.widgets import Footer, Static
 
-from . import config, media, render
+from . import __version__, config, media, render
 from .matrix import Matrix, MatrixError, retry
 from .model import Changes, Event, Store
 from .emoji import EmojiPicker
@@ -31,6 +32,7 @@ from .widgets import (Attachment, AttachmentTray, Composer, Confirm, ContextMenu
                       LogoutRequested, MessageView, Settings, Sidebar, Timeline)
 
 BUILTIN_STYLE = Path(__file__).with_name("pupila.tcss")
+log = logging.getLogger("pupila")
 
 THEME = Theme(
     name="pupila", primary="#9b87f5", secondary="#7c6fd6", accent="#c9b8ff",
@@ -127,6 +129,8 @@ class Pupila(App):
         self.theme = "pupila"
         await self.query_one(Timeline).show(None)
         self.query_one(AttachmentTray).display = False
+        self.query_one(Sidebar).set_class(bool(config.load_ui().get("sidebar_hidden")), "-hidden")
+        log.info("pupila %s started; graphics: %s", __version__, media.has_graphics(self.cfg.image_style))
         self.paint_header()
         session = config.read_session()
         if session:
@@ -346,7 +350,9 @@ class Pupila(App):
                 break
 
     def action_sidebar(self) -> None:
-        self.query_one(Sidebar).toggle_class("-hidden")
+        sidebar = self.query_one(Sidebar)
+        sidebar.toggle_class("-hidden")
+        config.save_ui({"sidebar_hidden": sidebar.has_class("-hidden")})
 
     # ------------------------------------------------------------------ settings
 
@@ -748,11 +754,20 @@ class Pupila(App):
             img = PILImage.open(io.BytesIO(data))
             img.load()
             img = media.round_avatar(img)
-        except Exception as e:  # broken image, network
-            self.log(f"avatar {mxc}: {e}")
-            img = None
+        except Exception as e:  # broken image, network: not remembered, so it's tried again later
+            log.warning("avatar %s failed: %s", mxc, e)
+            return None
         self.images[key] = img
+        log.info("avatar %s ready", mxc)
+        self._show_avatar_everywhere(mxc)
         return img
+
+    def _show_avatar_everywhere(self, mxc: str) -> None:
+        """Once a picture is ready, every message of that person still showing the initial gets it,
+        whichever message asked for it and whenever they were drawn."""
+        for view in self.query(MessageView):
+            if view.group and view._avatar_url() == mxc:
+                view.call_after_refresh(view._swap_avatar)
 
     async def download(self, ev: Event) -> Path | None:
         """The whole file, kept in the cache (downloaded only once)."""
