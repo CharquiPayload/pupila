@@ -1,3 +1,3 @@
 """Pupila: a Matrix client for the terminal, without Vim modes."""
 
-__version__ = "0.6.2"
+__version__ = "0.6.3"

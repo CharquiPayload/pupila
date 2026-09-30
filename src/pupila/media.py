@@ -332,11 +332,12 @@ def initial_avatar(letter: str, color: str, size: int = 96) -> Image.Image:
     return img.resize((size, size), Image.LANCZOS)
 
 
-def smiley_icon(color: str = "#9b87f5", frame: str = "#6d5fb0", height: int = 96) -> Image.Image:
+def smiley_icon(color: str = "#9b87f5", height: int = 96) -> Image.Image:
     """The emoji button: a rounded box with a face that fills it, centred.
 
     Drawn as a picture because a terminal can't make a character bigger. 4:3, like 8 columns
-    by 3 lines.
+    by 3 lines. The box's lines sit in the middle of the outer cells, where the terminal draws
+    the composer's box (╭─╮), so both boxes line up.
     """
     from PIL import ImageDraw
 
@@ -344,13 +345,15 @@ def smiley_icon(color: str = "#9b87f5", frame: str = "#6d5fb0", height: int = 96
     w = h * 4 // 3
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    line = h // 22
-    d.rounded_rectangle((line, line, w - line, h - line), radius=h // 5, outline=frame, width=line)
-    face = h * 0.62
+    inset_x, inset_y = w / 16, h / 6          # half a column, half a line
+    line = max(4, h // 32)                    # about as thick as a box-drawing line
+    d.rounded_rectangle((inset_x, inset_y, w - inset_x, h - inset_y), radius=h / 6, outline=color,
+                        width=line)
+    face = h * 0.56
     x0, y0 = (w - face) / 2, (h - face) / 2
-    stroke = h // 16
+    stroke = h // 22
     d.ellipse((x0, y0, x0 + face, y0 + face), outline=color, width=stroke)
-    eye = face * 0.075
+    eye = face * 0.08
     for cx in (x0 + face * 0.36, x0 + face * 0.64):
         cy = y0 + face * 0.38
         d.ellipse((cx - eye, cy - eye, cx + eye, cy + eye), fill=color)
