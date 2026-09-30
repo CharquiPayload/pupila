@@ -33,15 +33,28 @@
 #typing { height: 1; padding: 0 2; }
 #action { height: auto; padding: 0 2; display: none; }
 #action.-visible { display: block; }
+#compose-row { height: auto; margin: 0 1; }
 #composer {
+    width: 1fr;
     height: auto;
     min-height: 3;
     max-height: 10;
-    margin: 0 1;
     border: round $primary 60%;
     background: $surface;
 }
 #composer:focus { border: round $primary; }
+#emoji-button {
+    width: 6;
+    min-width: 6;
+    height: 3;
+    margin-left: 1;
+    border: round $primary 60%;
+    background: $surface;
+    color: $primary;
+    text-style: bold;
+}
+#emoji-button:hover { border: round $primary; background: $primary 20%; }
+#emoji-button:focus { text-style: bold; }
 
 /* --- messages --- */
 .message { height: auto; padding: 0 1; }
@@ -91,7 +104,7 @@
 }
 
 /* --- dialogs --- */
-Menu, Confirm, ReactionPicker, Login, Settings { align: center middle; }
+Menu, Confirm, Login, Settings { align: center middle; }
 
 /* --- right-click menu, next to the cursor --- */
 ContextMenu { background: transparent; align: left top; }
@@ -107,32 +120,25 @@ ContextMenu { background: transparent; align: left top; }
 #context .quick-reaction:hover { background: $primary 40%; }
 #context OptionList { height: auto; border: none; background: $surface; padding: 0; }
 
-/* --- "more reactions" --- */
-.picker { width: 60; }
-.picker Input { width: 100%; }
-.emoji-grid { grid-size: 10; grid-gutter: 0 1; height: auto; margin-bottom: 1; }
-.emoji-cell { width: 4; height: 1; content-align: center middle; }
-.emoji-cell:hover { background: $primary 40%; }
-.dialog {
-    width: 60;
-    height: auto;
-    max-height: 80%;
-    padding: 1 2;
+/* --- emoji picker --- */
+EmojiPicker { background: transparent; align: left top; }
+#emoji-picker {
+    width: 50;
+    height: 22;
     background: $surface;
     border: round $primary;
+    padding: 0 1;
 }
-.dialog .title { text-style: bold; margin-bottom: 1; }
-.dialog OptionList { height: auto; max-height: 14; border: none; background: $surface; }
-.dialog .buttons { height: auto; align-horizontal: right; }
-.dialog .buttons Button { margin-left: 1; }
-.dialog .emojis { height: auto; }
-.dialog .emoji { min-width: 5; width: 5; margin: 0; }
-.login { width: 56; }
-.login .logo { text-style: bold; color: $primary; text-align: center; width: 100%; }
-.login .title { text-align: center; width: 100%; text-style: none; color: $text-muted; }
-.login Input { margin-bottom: 1; }
-.login Button { width: 100%; }
-#error { color: $error; margin-top: 1; }
+#emoji-search { width: 100%; height: 3; margin-bottom: 0; }
+#emoji-main { height: 1fr; }
+#emoji-cats { width: 4; height: 100%; }
+#emoji-cats .cat { width: 3; height: 1; content-align: center middle; margin-bottom: 0; }
+#emoji-cats .cat:hover { background: $primary 40%; }
+#emoji-scroll { width: 1fr; height: 100%; scrollbar-size-vertical: 1; }
+#emoji-scroll .cat-title { color: $text-muted; text-style: bold; margin-top: 1; }
+#emoji-scroll EmojiGrid { width: 36; height: auto; }
+#emoji-none { color: $text-muted; }
+#emoji-preview { height: 1; color: $text; }
 
 /* --- settings --- */
 .settings { width: 76; height: 90%; max-height: 44; }

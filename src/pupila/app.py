@@ -21,13 +21,14 @@ from textual.binding import Binding
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal, Vertical
 from textual.theme import Theme
-from textual.widgets import Footer, Static
+from textual.widgets import Button, Footer, Static
 
 from . import config, media, render
 from .matrix import Matrix, MatrixError, retry
 from .model import Changes, Event, Store
-from .widgets import (Composer, Confirm, ContextMenu, Login, LogoutRequested, MessageView, ReactionPicker,
-                      Settings, Sidebar, Timeline)
+from .emoji import EmojiPicker
+from .widgets import (Composer, Confirm, ContextMenu, Login, LogoutRequested, MessageView, Settings, Sidebar,
+                      Timeline)
 
 BUILTIN_STYLE = Path(__file__).with_name("pupila.tcss")
 
@@ -112,7 +113,9 @@ class Pupila(App):
                 yield Timeline(id="timeline")
                 yield Static(id="typing")
                 yield Static(id="action")
-                yield Composer(id="composer")
+                with Horizontal(id="compose-row"):
+                    yield Composer(id="composer")
+                    yield Button("☺", id="emoji-button")
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -555,6 +558,19 @@ class Pupila(App):
             self.paint_action()
         self.query_one(Composer).focus()
 
+    @on(Button.Pressed, "#emoji-button")
+    @work(exclusive=True, group="emoji")
+    async def _emoji_button(self) -> None:
+        button = self.query_one("#emoji-button")
+        region = button.region
+        emoji = await self.push_screen_wait(
+            EmojiPicker((region.right, region.y), config.frequent_emojis(), above=True))
+        composer = self.query_one(Composer)
+        if emoji:
+            composer.insert(emoji)
+            config.count_emoji(emoji)
+        composer.focus()
+
     @on(Composer.EditLast)
     def _edit_last(self) -> None:
         r = self.store.rooms.get(self.current) if self.store and self.current else None
@@ -613,7 +629,7 @@ class Pupila(App):
         if choice.startswith("react:"):
             await self.react(ev, choice[6:])
         elif choice == "react-more":
-            key = await self.push_screen_wait(ReactionPicker())
+            key = await self.push_screen_wait(EmojiPicker((event.x, event.y), config.frequent_emojis()))
             if key:
                 await self.react(ev, key)
         elif choice == "open":
@@ -641,7 +657,7 @@ class Pupila(App):
                 await self.mx.redact(self.current, mine)  # picking the same reaction removes it
             else:
                 await self.mx.react(self.current, ev.event_id, key)
-                config.count_reaction(key)
+                config.count_emoji(key)
         except (MatrixError, httpx.HTTPError) as e:
             self.notify(f"Couldn't react: {e}", severity="error")
 

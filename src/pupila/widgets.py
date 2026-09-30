@@ -658,34 +658,6 @@ class Confirm(ModalScreen[bool]):
         self.dismiss(event.button.id == "yes")
 
 
-EMOJIS = ("👍 👎 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 😂 🤣 😊 😍 🥰 😘 😎 🤩 🥳 😮 😯 😲 😢 😭 😡 🤬 😱 😳 🥺 😅 "
-          "😆 🙂 🙃 😉 😏 😴 🤔 🤨 😐 😬 🙄 🤯 🤡 💀 👻 👀 🙏 👏 🙌 👋 🤝 💪 🫡 🤷 🤦 ✅ ❌ ⭐ 🔥 💯 "
-          "🎉 🎊 🌸 🌺 🌈 ☀️ 🌙 ⚡ 💩 🍕 🍺 ☕ 🎮 🎵 💤 ⚠️ ❓ ❗ 🆗 🐱").split()
-
-
-class ReactionPicker(ModalScreen[str | None]):
-    """"More reactions": a grid of emojis, or type any other."""
-
-    BINDINGS = [("escape", "dismiss(None)", "Close")]
-
-    def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog picker"):
-            yield Static("React", classes="title")
-            with Grid(classes="emoji-grid"):
-                for e in EMOJIS:
-                    yield Static(e, classes="emoji-cell")
-            yield Input(placeholder="or type any emoji / text, then Enter")
-
-    def on_click(self, event) -> None:
-        if event.widget is not None and event.widget.has_class("emoji-cell"):
-            self.dismiss(str(event.widget.content))
-        elif event.widget is self:
-            self.dismiss(None)
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.dismiss(event.value.strip() or None)
-
-
 class ContextMenu(ModalScreen[str | None]):
     """The quick menu of a message, right next to the cursor (right click), like Discord's.
 

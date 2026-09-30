@@ -138,21 +138,28 @@ REACTIONS_FILE = STATE_DIR / "reactions.json"
 DEFAULT_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🙏", "👀"]
 
 
+def _emoji_counts() -> dict[str, int]:
+    try:
+        return json.loads(REACTIONS_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
 def top_reactions(n: int = 6) -> list[str]:
     """The reactions you use most, topped up with the usual ones."""
-    try:
-        counts = json.loads(REACTIONS_FILE.read_text())
-    except (OSError, ValueError):
-        counts = {}
+    counts = _emoji_counts()
     used = sorted(counts, key=lambda k: -counts[k])
     return (used + [r for r in DEFAULT_REACTIONS if r not in used])[:n]
 
 
-def count_reaction(key: str) -> None:
-    try:
-        counts = json.loads(REACTIONS_FILE.read_text())
-    except (OSError, ValueError):
-        counts = {}
+def frequent_emojis(n: int = 24) -> list[str]:
+    """For the picker's "Frequently used" row: only what you've actually used."""
+    counts = _emoji_counts()
+    return sorted(counts, key=lambda k: -counts[k])[:n]
+
+
+def count_emoji(key: str) -> None:
+    counts = _emoji_counts()
     counts[key] = counts.get(key, 0) + 1
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     REACTIONS_FILE.write_text(json.dumps(counts, ensure_ascii=False))

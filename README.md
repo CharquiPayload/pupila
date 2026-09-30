@@ -47,7 +47,10 @@ with `style = "blocks"` in the `[images]` section of `config.toml`.
 | `Ctrl+Q` | quit |
 
 **Right-click a message** for its quick menu, right next to the cursor: your most used
-reactions (＋ for more), reply, copy, edit, delete, open or save to your Downloads folder.
+reactions (＋ opens the emoji picker), reply, copy, edit, delete, open or save to your
+Downloads folder.
+**The ☺ button** next to the composer opens the emoji picker: search by name (heart, fire,
+smile…), browse by category or pick from your most used ones.
 **Drag over text** to select it and `Ctrl+C` to copy it.
 **Click an image or GIF** to open it large; **click a video** to play it right there.
 **Drag a file** onto the terminal to send it.
