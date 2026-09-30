@@ -689,7 +689,8 @@ class Pupila(App):
             bucle = ["--loop-file=inf"] if medios.es_animado(ev) else []
             if self.cfg.reproductor == "terminal":
                 with self.suspend():  # mpv dibuja en la misma terminal; q vuelve a Pupila
-                    subprocess.run([mpv, "--vo=tct", "--really-quiet", *bucle, str(ruta)])
+                    subprocess.run([mpv, *medios.salida_mpv(self.cfg.estilo_imagen), "--really-quiet",
+                                    *bucle, str(ruta)])
                 return
             await asyncio.create_subprocess_exec(
                 mpv, "--force-window=immediate", "--really-quiet", *bucle, str(ruta),

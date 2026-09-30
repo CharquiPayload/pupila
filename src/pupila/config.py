@@ -45,7 +45,8 @@ animar = true           # los GIF se mueven dentro del chat (los de Discord/What
 [videos]
 # Al hacer clic en un video o GIF:
 #   "auto": mpv si está instalado; si no, el programa por defecto del sistema
-#   "terminal": dentro de la misma terminal con mpv, en bloques de colores (q para volver)
+#   "terminal": dentro de la misma terminal con mpv (q para volver): nítido en kitty y
+#               foot, en bloques de colores en Alacritty o si estilo = "bloques"
 reproductor = "auto"
 
 [salas]

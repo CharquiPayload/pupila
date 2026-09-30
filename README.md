@@ -50,7 +50,8 @@ lo envía.
 - Los **videos** muestran su primer cuadro con la duración. Al hacer clic se abren con
   [mpv](https://mpv.io) si está instalado, o con el programa por defecto del sistema.
 - Con `reproductor = "terminal"` en la sección `[videos]` de `config.toml`, mpv los reproduce
-  dentro de la misma terminal, en bloques de colores (`q` vuelve a Pupila).
+  dentro de la misma terminal (`q` vuelve a Pupila): nítidos en kitty (su protocolo de
+  gráficos) y en foot (sixel), y en bloques de colores en Alacritty.
 
 Comandos: `/me acción`, `/subir ruta`, `/ayuda`. Para enviar algo que empiece con `/`,
 escribe `//`.

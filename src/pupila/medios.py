@@ -95,3 +95,19 @@ async def cuadros_video(datos: bytes) -> list[tuple[Image.Image, float]]:
 async def primer_cuadro(datos: bytes) -> Image.Image | None:
     cuadros = await _ffmpeg(datos, "-vf", f"scale={ANCHO}:-2", "-frames:v", "1")
     return cuadros[0] if cuadros else None
+
+
+def salida_mpv(estilo_imagen: str) -> list[str]:
+    """Cómo dibuja mpv el video dentro de la terminal, según lo que la terminal sabe hacer.
+
+    kitty: su protocolo de gráficos; foot y otras con sixel: sixel; el resto (Alacritty):
+    bloques de colores. Con el estilo "bloques" o "texto" se fuerzan los bloques.
+    """
+    from textual_image.renderable import Image, SixelImage, TGPImage
+
+    if estilo_imagen not in ("bloques", "texto"):
+        if Image is TGPImage:
+            return ["--vo=kitty", "--vo-kitty-use-shm=yes", "--profile=sw-fast"]
+        if Image is SixelImage:
+            return ["--vo=sixel", "--profile=sw-fast"]
+    return ["--vo=tct"]
