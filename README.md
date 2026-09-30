@@ -49,8 +49,10 @@ with `style = "blocks"` in the `[images]` section of `config.toml`.
 **Right-click a message** for its quick menu, right next to the cursor: your most used
 reactions (＋ opens the emoji picker), reply, copy, edit, delete, open or save to your
 Downloads folder.
-**The ☺ button** next to the composer opens the emoji picker: search by name (heart, fire,
-smile…), browse by category or pick from your most used ones.
+**The composer** works like Discord's: **⊕** on the left attaches files (with the system's file
+dialog if zenity is installed, or a folder tree otherwise) and **☺** on the right opens the
+emoji picker: search by name (heart, fire, smile…), browse by category or pick from your most
+used ones. Deleted messages disappear from the chat.
 **Drag over text** to select it and `Ctrl+C` to copy it.
 **Click an image or GIF** to open it large; **click a video** to play it right there.
 **Drag a file** onto the terminal, paste an image or use `/upload path` and it waits in a tray

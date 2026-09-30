@@ -27,7 +27,7 @@ from . import config, media, render
 from .matrix import Matrix, MatrixError, retry
 from .model import Changes, Event, Store
 from .emoji import EmojiPicker
-from .widgets import (Attachment, AttachmentTray, Composer, Confirm, ContextMenu, EmojiButton, Login,
+from .widgets import (Attachment, AttachmentTray, Composer, Confirm, ContextMenu, FilePicker, IconButton, Login,
                       LogoutRequested, MessageView, Settings, Sidebar, Timeline)
 
 BUILTIN_STYLE = Path(__file__).with_name("pupila.tcss")
@@ -117,8 +117,9 @@ class Pupila(App):
                 yield Static(id="action")
                 yield AttachmentTray(id="attachments")
                 with Horizontal(id="compose-row"):
+                    yield IconButton("⊕", media.plus_icon, id="attach-button")
                     yield Composer(id="composer")
-                    yield EmojiButton(id="emoji-button")
+                    yield IconButton("☺", media.smiley_icon, id="emoji-button")
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -448,12 +449,12 @@ class Pupila(App):
         if self.cfg.bell:
             self.bell()
 
-    async def _run(self, *cmd: str, stdin: bytes | None = None) -> tuple[int, bytes]:
+    async def _run(self, *cmd: str, stdin: bytes | None = None, timeout: float = 20) -> tuple[int, bytes]:
         try:
             p = await asyncio.create_subprocess_exec(
                 *cmd, stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-            out, _ = await asyncio.wait_for(p.communicate(stdin), 20)
+            out, _ = await asyncio.wait_for(p.communicate(stdin), timeout)
             return p.returncode or 0, out
         except (OSError, asyncio.TimeoutError):
             return 1, b""
@@ -574,7 +575,25 @@ class Pupila(App):
             await self._show_tray()
         self.query_one(Composer).focus()
 
-    @on(EmojiButton.Pressed)
+    @on(IconButton.Pressed, "#attach-button")
+    @work(exclusive=True, group="attach")
+    async def _attach_button(self) -> None:
+        """The ＋ in the composer: the system's file dialog (zenity) or, without one, Pupila's own."""
+        paths: list[Path] = []
+        if shutil.which("zenity"):
+            code, out = await self._run(
+                "zenity", "--file-selection", "--multiple", "--separator=\n", "--title=Pupila: attach files",
+                f"--filename={Path.home()}/", timeout=600)
+            if code == 0:
+                paths = [Path(p) for p in out.decode(errors="replace").splitlines() if p.strip()]
+        else:
+            chosen = await self.push_screen_wait(FilePicker(Path.home()))
+            paths = [chosen] if chosen else []
+        for path in paths:
+            await self.attach_path(path)
+        self.query_one(Composer).focus()
+
+    @on(IconButton.Pressed, "#emoji-button")
     @work(exclusive=True, group="emoji")
     async def _emoji_button(self) -> None:
         button = self.query_one("#emoji-button")

@@ -15,7 +15,8 @@ from textual.app import ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Input, Label, OptionList, Select, Static, Switch, TextArea, Tree
+from textual.widgets import (Button, Checkbox, DirectoryTree, Input, Label, OptionList, Select, Static, Switch,
+                             TextArea, Tree)
 from textual.widgets.option_list import Option
 from textual_image.widget import HalfcellImage, UnicodeImage
 from textual_image.renderable.tgp import Image as _TGPRenderable
@@ -155,6 +156,13 @@ class MessageView(Vertical):
         url = self._avatar_url()
         if not url or await self.pupila.avatar(url) is None or not self.is_mounted:
             return
+        # From the /tmp cache the picture can arrive before this message's own parts are
+        # mounted; swapping then would find no slot and leave the initial there for good.
+        self.call_after_refresh(self._swap_avatar)
+
+    async def _swap_avatar(self) -> None:
+        if not self.is_mounted:
+            return
         for slot in self.query(".avatar-slot"):
             await slot.remove_children()
             await slot.mount(self._avatar())
@@ -208,13 +216,7 @@ class MessageView(Vertical):
             yield Static(s, classes="suffix")
 
     def _fit_width(self, renderable) -> int:
-        try:
-            room_width = self.app.query_one("#timeline").size.width
-        except Exception:
-            room_width = 0
-        if room_width < 20:
-            room_width = max(40, self.app.size.width - 36)
-        room_width -= 6 if self.pupila.cfg.avatars else 0
+        room_width = self._room_width()
         available = max(16, int(room_width * 0.9) - 6)  # bubble: 90%, minus border and padding
         console = Console(width=available, file=io.StringIO(), color_system=None)
         lines = console.render_lines(renderable, console.options.update_width(available), pad=False)
@@ -230,9 +232,23 @@ class MessageView(Vertical):
         cls = IMAGE_STYLES.get(self.pupila.cfg.image_style, IMAGE_STYLES["auto"])
         w = cls(img, classes="image media")
         height = self.pupila.cfg.image_height
+        width = cells_wide(img, height)
+        widest = self._room_width() - 8  # wide screenshots: shrink to the room instead of spilling out
+        if width > widest:
+            width = max(4, widest)
+            height = max(1, round(height * width / cells_wide(img, height)))
         w.styles.height = height
-        w.styles.width = cells_wide(img, height)
+        w.styles.width = width
         return w
+
+    def _room_width(self) -> int:
+        try:
+            width = self.app.query_one("#timeline").size.width
+        except Exception:
+            width = 0
+        if width < 20:
+            width = max(40, self.app.size.width - 36)
+        return width - (6 if self.pupila.cfg.avatars else 0)
 
     def _needs_media(self) -> bool:
         if not self._has_media():
@@ -407,6 +423,8 @@ class Timeline(VerticalScroll):
             widgets.append(Static("⬆  older messages (scroll up to load them)", classes="more"))
         prev = None
         for ev in room.events:
+            if ev.redacted:  # deleted messages disappear, like in Discord
+                continue
             widgets.extend(self._widgets(ev, prev))
             prev = ev
         if not room.events:
@@ -422,6 +440,8 @@ class Timeline(VerticalScroll):
         self.reindex()
         prev, new = None, []
         for ev in self.room.events:
+            if ev.redacted:
+                continue
             if ev.event_id not in self.by_id:
                 new.extend(self._widgets(ev, prev))
             prev = ev
@@ -435,7 +455,9 @@ class Timeline(VerticalScroll):
 
     async def update_event(self, event_id: str) -> None:
         m = self.by_id.get(event_id)
-        if m:
+        if m and m.ev.redacted:
+            await self.remove_event(event_id)
+        elif m:
             await m.refresh_view()
 
     async def remove_event(self, event_id: str) -> None:
@@ -605,26 +627,35 @@ class AttachmentTray(Horizontal):
             self.post_message(self.Removed(int(w.name or 0)))
 
 
-class EmojiButton(Vertical):
-    """The button next to the composer that opens the emoji picker: a face drawn to fill it."""
+class IconButton(Static):
+    """A small icon inside the composer's box, like Discord's: drawn in terminals with
+    graphics, a character in the others."""
 
     class Pressed(Message):
-        pass
+        def __init__(self, button: "IconButton") -> None:
+            super().__init__()
+            self.button = button
+
+        @property
+        def control(self) -> "IconButton":  # lets @on(IconButton.Pressed, "#id") pick the button
+            return self.button
+
+    def __init__(self, glyph: str, draw, **kw) -> None:
+        super().__init__(**kw)
+        self.glyph, self.draw = glyph, draw
 
     def compose(self) -> ComposeResult:
-        style = self.app.cfg.image_style  # type: ignore[attr-defined]
-        if media.has_graphics(style):
-            img = media.smiley_icon()
-            w = IMAGE_STYLES["auto"](img, classes="icon")
-            w.styles.height = 3
-            w.styles.width = 8
+        if media.has_graphics(self.app.cfg.image_style):  # type: ignore[attr-defined]
+            w = IMAGE_STYLES["auto"](self.draw(), classes="icon")
+            w.styles.height = 1
+            w.styles.width = 2
             yield w
         else:
-            yield Static("☺", classes="icon-text")
+            yield Static(self.glyph, classes="icon-text")
 
     def on_click(self, event) -> None:
         event.stop()
-        self.post_message(self.Pressed())
+        self.post_message(self.Pressed(self))
 
 
 # --------------------------------------------------------------------------- composer
@@ -861,6 +892,25 @@ class Settings(ModalScreen["config.Config | None"]):
             sort_by_name=[str(cb.label) for cb in self.query(".sort-space").results(Checkbox) if cb.value],
             colors=dict(self.cfg.colors),
         )
+
+
+class FilePicker(ModalScreen[Path | None]):
+    """For systems without a file dialog (zenity): pick a file from a tree of folders."""
+
+    BINDINGS = [("escape", "dismiss(None)", "Close")]
+
+    def __init__(self, start: Path) -> None:
+        super().__init__()
+        self.start = start
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog files"):
+            yield Static("Attach a file", classes="title")
+            yield DirectoryTree(str(self.start))
+            yield Static("Enter or double-click a file to attach it · Esc closes", classes="hint")
+
+    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+        self.dismiss(Path(event.path))
 
 
 class LogoutRequested(Message):

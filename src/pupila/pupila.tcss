@@ -33,52 +33,27 @@
 #typing { height: 1; padding: 0 2; }
 #action { height: auto; padding: 0 2; display: none; }
 #action.-visible { display: block; }
-#compose-row { height: auto; margin: 0 1; }
-#attachments { height: auto; margin: 0 1; padding: 0; }
-#attachments .attachment {
-    width: auto;
-    min-width: 16;
-    max-width: 36;
+#compose-row {
     height: auto;
-    margin-right: 1;
-    padding: 0 1;
+    margin: 0 1;
     border: round $primary 60%;
     background: $surface;
 }
-#attachments .attachment-remove {
-    dock: right;
-    width: 1;
-    height: 1;
-    color: $error;
-    text-style: bold;
-}
-#attachments .attachment-icon { height: 1; width: auto; }
-#attachments .attachment-name { width: auto; height: 1; }
+#compose-row:focus-within { border: round $primary; }
 #composer {
     width: 1fr;
     height: auto;
-    min-height: 3;
-    max-height: 10;
-    border: round $primary 60%;
+    min-height: 1;
+    max-height: 8;
+    border: none;
+    padding: 0 1;
     background: $surface;
 }
-#composer:focus { border: round $primary; }
-#emoji-button {
-    width: 8;
-    height: 3;
-    margin-left: 1;
-    align: center middle;
-}
-#emoji-button:hover { background: $primary 20%; }
-#emoji-button .icon-text {
-    width: 100%;
-    height: 3;
-    content-align: center middle;
-    text-align: center;
-    color: $primary;
-    text-style: bold;
-    border: round $primary 60%;
-}
+#composer:focus { border: none; }
+IconButton { width: 3; height: 1; content-align: center middle; }
+IconButton:hover { background: $primary 30%; }
+IconButton .icon-text { width: 100%; height: 1; content-align: center middle; color: $accent; text-style: bold; }
+
 
 /* --- messages --- */
 .message { height: auto; padding: 0 1; }
@@ -181,3 +156,30 @@ EmojiPicker { background: transparent; align: left top; }
 .settings .hint { color: $text-muted; margin-top: 1; }
 .settings #logout { margin-top: 1; }
 .settings .buttons { margin-top: 1; }
+
+/* --- attach a file (without zenity) --- */
+FilePicker { align: center middle; }
+.files { width: 70; height: 80%; }
+.files DirectoryTree { height: 1fr; background: $surface; }
+
+/* --- files waiting to be sent, above the composer --- */
+#attachments { height: auto; margin: 0 1; padding: 0; }
+#attachments .attachment {
+    width: auto;
+    min-width: 16;
+    max-width: 36;
+    height: auto;
+    margin-right: 1;
+    padding: 0 1;
+    border: round $primary 60%;
+    background: $surface;
+}
+#attachments .attachment-remove {
+    dock: right;
+    width: 1;
+    height: 1;
+    color: $error;
+    text-style: bold;
+}
+#attachments .attachment-icon { height: 1; width: auto; }
+#attachments .attachment-name { width: auto; height: 1; }
