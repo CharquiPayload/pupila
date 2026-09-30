@@ -695,8 +695,17 @@ class Pupila(App):
                 mpv, "--force-window=immediate", "--really-quiet", *bucle, str(ruta),
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
         elif shutil.which("xdg-open"):
-            await asyncio.create_subprocess_exec("xdg-open", str(ruta), stdout=asyncio.subprocess.DEVNULL,
-                                                 stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+            p = await asyncio.create_subprocess_exec("xdg-open", str(ruta), stdout=asyncio.subprocess.DEVNULL,
+                                                     stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+            try:  # si en unos segundos terminó con error, es que no hay programa para ese tipo de archivo
+                fallo = await asyncio.wait_for(p.wait(), 4) != 0
+            except asyncio.TimeoutError:
+                fallo = False
+            if fallo:
+                consejo = ("Instala mpv (sudo pacman -S mpv) y Pupila lo usará para los videos."
+                           if es_video else "Tu sistema no tiene un programa asociado a este tipo de archivo.")
+                self.notify(f"No hay con qué abrir {nombre}. {consejo}\nQuedó guardado en {ruta}",
+                            severity="warning", timeout=12)
         else:
             self.notify(f"Guardado en {ruta}")
 
