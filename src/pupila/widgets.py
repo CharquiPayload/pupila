@@ -209,19 +209,25 @@ class MessageView(Vertical):
                 yield Static(text, classes="body")
         else:
             body = render.body(self.ev, store, self.room)
+            if isinstance(body, Markdown):
+                body = render.flatten(body, self._text_room())  # so it can be selected and copied
             w = Static(body, classes="body" + (" notice" if self.ev.msgtype == "m.notice" else ""))
-            if p.cfg.bubbles and isinstance(body, (Markdown, Text)):
-                # A bubble sized by its content: Markdown would shrink it to its minimum and long
-                # text would overflow it, so measure the widest line drawn at the room's width.
+            if p.cfg.bubbles and isinstance(body, Text):
+                # A bubble sized by its content: long text would overflow it, so measure the
+                # widest line drawn at the room's width.
                 w.styles.width = self._fit_width(body)
             yield w
         s = render.suffix(self.ev)
         if s:
             yield Static(s, classes="suffix")
 
-    def _fit_width(self, renderable) -> int:
+    def _text_room(self) -> int:
+        """How wide a message's text can be: the bubble's 90% minus its border and padding."""
         room_width = self._room_width()
-        available = max(16, int(room_width * 0.9) - 6)  # bubble: 90%, minus border and padding
+        return max(16, int(room_width * 0.9) - 6) if self.pupila.cfg.bubbles else max(16, room_width - 4)
+
+    def _fit_width(self, renderable) -> int:
+        available = self._text_room()
         console = Console(width=available, file=io.StringIO(), color_system=None)
         lines = console.render_lines(renderable, console.options.update_width(available), pad=False)
         widest = max((cell_len("".join(seg.text for seg in line).rstrip()) for line in lines), default=1)
@@ -790,7 +796,12 @@ class ContextMenu(ModalScreen[str | None]):
             with Horizontal(classes="quick"):
                 for e in self.reactions:
                     yield Static(e, classes="quick-reaction")
-                yield Static("＋", classes="quick-reaction more")
+                if media.has_graphics(self.app.cfg.image_style):  # type: ignore[attr-defined]
+                    more = IMAGE_STYLES["auto"](media.add_reaction_icon(), classes="quick-reaction more")
+                    more.styles.width, more.styles.height = 2, 1
+                    yield more
+                else:
+                    yield Static("+", classes="quick-reaction more")
             yield OptionList(*[Option(text, id=oid) for oid, text in self.options])
 
     def on_mount(self) -> None:

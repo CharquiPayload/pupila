@@ -85,6 +85,30 @@ def body(e: Event, store: Store, room: Room):
     return t
 
 
+def flatten(renderable, width: int) -> Text:
+    """Draws Markdown (or anything Rich can draw) at `width` into plain styled Text.
+
+    Textual can only select and copy text it knows as text: a Markdown object is a picture to
+    it, so drag-selecting a formatted message found nothing.
+    """
+    import io
+
+    from rich.console import Console
+
+    console = Console(width=width, file=io.StringIO(), force_terminal=True, color_system="truecolor")
+    out = Text()
+    for i, line in enumerate(console.render_lines(renderable, console.options.update_width(width), pad=False)):
+        row = Text()
+        for seg in line:
+            if not seg.control:
+                row.append(seg.text, seg.style)
+        row.rstrip()
+        if i:
+            out.append("\n")
+        out.append_text(row)
+    return out
+
+
 def attachment(e: Event) -> Text:
     from .media import duration, is_animated
 

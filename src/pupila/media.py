@@ -363,3 +363,22 @@ def plus_icon(color: str = "#b4a7f5", size: int = 64) -> Image.Image:
     d.rectangle((c - arm, c - stroke / 2, c + arm, c + stroke / 2), fill="#16141d")
     d.rectangle((c - stroke / 2, c - arm, c + stroke / 2, c + arm), fill="#16141d")
     return img.resize((size, size), Image.LANCZOS)
+
+
+def add_reaction_icon(color: str = "#b4a7f5", size: int = 64) -> Image.Image:
+    """"More reactions": a face with a small plus, like Discord's."""
+    img, d, big = _icon_canvas(size)
+    stroke = big // 12
+    face = big * 0.78
+    x0, y0 = big * 0.04, big - face - big * 0.04
+    d.ellipse((x0, y0, x0 + face, y0 + face), outline=color, width=stroke)
+    eye = face * 0.075
+    for cx in (x0 + face * 0.36, x0 + face * 0.64):
+        cy = y0 + face * 0.4
+        d.ellipse((cx - eye, cy - eye, cx + eye, cy + eye), fill=color)
+    d.arc((x0 + face * 0.27, y0 + face * 0.27, x0 + face * 0.73, y0 + face * 0.73), start=25, end=155,
+          fill=color, width=stroke)
+    c, arm = big * 0.8, big * 0.17
+    d.rectangle((c - arm, big * 0.2 - stroke / 2, c + arm, big * 0.2 + stroke / 2), fill=color)
+    d.rectangle((c - stroke / 2, big * 0.2 - arm, c + stroke / 2, big * 0.2 + arm), fill=color)
+    return img.resize((size, size), Image.LANCZOS)

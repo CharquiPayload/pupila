@@ -41,6 +41,7 @@ def main() -> int:
     # happened in the last run without piling up.
     logging.basicConfig(filename=config.media_dir() / "pupila.log", filemode="w", level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # one line per request drowned everything else
 
     from .app import Pupila  # imports textual-image, which asks the terminal before starting
 
