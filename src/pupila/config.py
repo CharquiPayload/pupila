@@ -36,7 +36,10 @@ campana = false         # además, la campana de la terminal
 
 [imagenes]
 activas = true          # mostrar imágenes dentro de la terminal
-alto = 12               # alto máximo en líneas
+alto = 12               # alto en líneas
+estilo = "auto"         # "auto": nítidas si la terminal puede (foot, kitty), bloques si no
+                        # "bloques": siempre en bloques de colores, estilo pixel
+                        # "texto": con caracteres, lo más retro
 
 [salas]
 # Espacios cuyas salas van por nombre (el resto, por actividad reciente).
@@ -54,6 +57,7 @@ class Config:
     campana: bool = False
     imagenes: bool = True
     alto_imagen: int = 12
+    estilo_imagen: str = "auto"
     por_nombre: list[str] = field(default_factory=list)
     colores: dict[str, str] = field(default_factory=dict)
 
@@ -70,7 +74,8 @@ def cargar() -> Config:
     return Config(
         avisos=a.get("activos", True), avisos_texto=a.get("con_texto", True),
         campana=a.get("campana", False), imagenes=i.get("activas", True),
-        alto_imagen=int(i.get("alto", 12)), por_nombre=list(s.get("por_nombre", [])),
+        alto_imagen=int(i.get("alto", 12)), estilo_imagen=str(i.get("estilo", "auto")),
+        por_nombre=list(s.get("por_nombre", [])),
         colores=dict(d.get("colores", {})),
     )
 

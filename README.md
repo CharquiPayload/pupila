@@ -21,7 +21,8 @@ La primera vez pide la dirección del servidor, tu usuario y tu contraseña. La 
 
 Para pegar imágenes con `Ctrl+V` hace falta `wl-clipboard` (Wayland) o `xclip` (X11). Las
 imágenes se ven nítidas en terminales con gráficos (foot, kitty, WezTerm, Ghostty) y
-pixeladas en las demás (Alacritty).
+en bloques de colores en las demás (Alacritty). Si te gusta el estilo pixel, se puede forzar
+con `estilo = "bloques"` en la sección `[imagenes]` de `config.toml`.
 
 ## Teclas
 

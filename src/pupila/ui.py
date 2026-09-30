@@ -12,6 +12,7 @@ from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, Static, TextArea, Tree
 from textual.widgets.option_list import Option
+from textual_image.widget import HalfcellImage, UnicodeImage
 from textual_image.widget import Image as ImagenTerminal
 
 from . import formato
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
     from .app import Pupila
 
 IMAGENES = {"m.image", "m.sticker"}
+ESTILOS_IMAGEN = {"auto": ImagenTerminal, "bloques": HalfcellImage, "texto": UnicodeImage}
 
 
 # --------------------------------------------------------------------------- mensajes
@@ -73,8 +75,9 @@ class Mensaje(Vertical):
         if r:
             yield Static(r, classes="reacciones")
 
-    def _imagen(self, img) -> ImagenTerminal:
-        w = ImagenTerminal(img, classes="imagen")
+    def _imagen(self, img):
+        clase = ESTILOS_IMAGEN.get(self.pupila.cfg.estilo_imagen, ImagenTerminal)
+        w = clase(img, classes="imagen")
         w.styles.height = self.pupila.cfg.alto_imagen
         w.styles.width = "auto"
         return w
