@@ -3,12 +3,15 @@
 - ~/.config/pupila/config.toml        preferences (created with defaults)
 - ~/.config/pupila/pupila.tcss        your own style, on top of the built-in one (optional)
 - ~/.local/state/pupila/session.json  the session token (readable only by you)
-- ~/.cache/pupila/                    downloaded images and files
+- /tmp/pupila-<uid>/                   downloaded images and files: /tmp is emptied on every
+                                       reboot, so nothing piles up (see media_dir)
 """
 from __future__ import annotations
 
 import json
 import os
+import shutil
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -101,6 +104,7 @@ def _from_spanish(d: dict) -> Config:
 def load() -> Config:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     _migrate_state()
+    remove_old_cache()
     if not CONFIG_FILE.exists():
         CONFIG_FILE.write_text(Config().to_toml())
     try:
@@ -127,6 +131,41 @@ def _migrate_state() -> None:
     for old, new in ((STATE_DIR / "sesion.json", SESSION_FILE), (STATE_DIR / "ultima_sala", LAST_ROOM_FILE)):
         if old.exists() and not new.exists():
             old.rename(new)
+
+
+def media_dir() -> Path:
+    """Where downloaded pictures, GIFs and files go: a private folder in /tmp."""
+    d = Path(tempfile.gettempdir()) / f"pupila-{os.getuid()}"
+    try:
+        d.mkdir(mode=0o700, exist_ok=True)
+        if d.stat().st_uid != os.getuid() or d.is_symlink():
+            raise PermissionError(d)  # someone else made it: don't use it
+        d.chmod(0o700)
+    except OSError:
+        d = CACHE_DIR / "media"
+        d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def remove_old_cache() -> None:
+    """Pupila 0.3.2 and earlier kept downloads in ~/.cache/pupila, which only grew."""
+    for name in ("files", "thumbnails", "archivos", "miniaturas"):
+        shutil.rmtree(CACHE_DIR / name, ignore_errors=True)
+    try:
+        CACHE_DIR.rmdir()
+    except OSError:
+        pass
+
+
+def downloads_dir() -> Path:
+    """The user's Downloads folder (XDG), for "Save to Downloads"."""
+    try:
+        for line in (Path.home() / ".config/user-dirs.dirs").read_text().splitlines():
+            if line.startswith("XDG_DOWNLOAD_DIR="):
+                return Path(os.path.expandvars(line.split("=", 1)[1].strip().strip('"')))
+    except OSError:
+        pass
+    return Path.home() / "Downloads"
 
 
 def read_session() -> dict | None:

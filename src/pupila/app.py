@@ -544,6 +544,7 @@ class Pupila(App):
         options = []
         if ev.msgtype in render.ICONS and ev.content.get("url"):
             options.append(("open", "Open in a player" if ev.msgtype == "m.video" else "Open"))
+            options.append(("save", "Save to Downloads"))
         if not ev.redacted:
             options += [("reply", "Reply"), ("react", "React")]
             if ev.msgtype not in render.ICONS:
@@ -559,6 +560,8 @@ class Pupila(App):
         choice = await self.push_screen_wait(Menu(title, options))
         if choice == "open":
             await self.open_file(ev, force_window=True)
+        elif choice == "save":
+            await self.save_file(ev)
         elif choice == "reply":
             self.reply(ev)
         elif choice == "react":
@@ -601,7 +604,7 @@ class Pupila(App):
     async def image(self, mxc: str) -> PILImage.Image | None:
         if mxc in self.images:
             return self.images[mxc]
-        cache = config.CACHE_DIR / "thumbnails" / mxc.removeprefix("mxc://").replace("/", "_")
+        cache = config.media_dir() / "thumbnails" / mxc.removeprefix("mxc://").replace("/", "_")
         try:
             if cache.exists():
                 data = cache.read_bytes()
@@ -621,7 +624,7 @@ class Pupila(App):
         """The whole file, kept in the cache (downloaded only once)."""
         mxc = ev.content.get("url", "")
         name = Path(ev.content.get("filename") or ev.content.get("body") or "file").name
-        dest = config.CACHE_DIR / "files" / f"{mxc.rsplit('/', 1)[-1]}_{name}"
+        dest = config.media_dir() / "files" / f"{mxc.rsplit('/', 1)[-1]}_{name}"
         if not dest.exists():
             try:
                 data = await self.mx.download(mxc)
@@ -710,6 +713,23 @@ class Pupila(App):
                             severity="warning", timeout=12)
         else:
             self.notify(f"Saved to {path}")
+
+    async def save_file(self, ev: Event) -> None:
+        """Copies a file out of the temporary folder into Downloads, without overwriting anything."""
+        path = await self.download(ev)
+        if not path:
+            self.notify("Couldn't download it.", severity="error")
+            return
+        folder = config.downloads_dir()
+        folder.mkdir(parents=True, exist_ok=True)
+        name = Path(ev.content.get("filename") or ev.content.get("body") or path.name).name
+        dest = folder / name
+        n = 1
+        while dest.exists():
+            dest = folder / f"{Path(name).stem} ({n}){Path(name).suffix}"
+            n += 1
+        await asyncio.to_thread(shutil.copyfile, path, dest)
+        self.notify(f"Saved to {dest}", timeout=5)
 
     @on(MessageView.Open)
     @work(group="open-file")

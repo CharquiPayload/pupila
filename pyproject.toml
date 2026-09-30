@@ -1,6 +1,6 @@
 [project]
 name = "pupila"
-version = "0.3.2"
+version = "0.3.3"
 description = "A Matrix client for the terminal, without Vim modes"
 readme = "README.md"
 requires-python = ">=3.11"

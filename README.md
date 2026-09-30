@@ -45,7 +45,8 @@ with `style = "blocks"` in the `[images]` section of `config.toml`.
 | `Ctrl+B` | show or hide the room sidebar |
 | `Ctrl+Q` | quit |
 
-**Click a message** to reply, react, copy, edit, delete or open its file.
+**Click a message** to reply, react, copy, edit, delete, open its file or save it to your
+Downloads folder.
 **Click an image or GIF** to open it large; **click a video** to play it right there.
 **Drag a file** onto the terminal to send it.
 
@@ -62,6 +63,10 @@ type `//`.
 - In the `[videos]` section of `config.toml`, `player` picks what a click does:
   `"chat"` (inside the message), `"terminal"` (full screen in the same terminal with mpv:
   sharp in kitty and foot, coloured blocks in Alacritty; `q` comes back) or `"window"`.
+
+Downloaded pictures, GIFs and videos are kept in `/tmp/pupila-<your uid>/`, so they load
+instantly while you use Pupila and are gone after the next reboot. To keep one, use
+"Save to Downloads" in the message menu.
 
 ## Customising
 
