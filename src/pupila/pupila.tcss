@@ -54,6 +54,17 @@
 .message .reactions { height: 1; }
 .message .image { margin-top: 1; }
 .message .notice { text-style: italic; }
+.message .with-avatar { height: auto; }
+.message .avatar-slot { width: 6; height: auto; }
+.message .avatar { height: 2; width: auto; }
+.message .initial {
+    width: 4;
+    height: 2;
+    content-align: center middle;
+    text-style: bold;
+    color: $background;
+}
+.message .content { width: 1fr; height: auto; }
 .day {
     width: 100%;
     text-align: center;
@@ -68,7 +79,7 @@
 }
 
 /* --- dialogs --- */
-Menu, Confirm, ReactionPicker, Login { align: center middle; }
+Menu, Confirm, ReactionPicker, Login, Settings { align: center middle; }
 .dialog {
     width: 60;
     height: auto;
@@ -89,3 +100,18 @@ Menu, Confirm, ReactionPicker, Login { align: center middle; }
 .login Input { margin-bottom: 1; }
 .login Button { width: 100%; }
 #error { color: $error; margin-top: 1; }
+
+/* --- settings --- */
+.settings { width: 76; height: 90%; max-height: 44; }
+.settings-body { height: 1fr; padding-right: 1; }
+.settings .section { text-style: bold; color: $primary; margin-top: 1; }
+.settings .setting { height: auto; }
+.settings Switch { height: 1; width: auto; border: none; padding: 0 1 0 0; background: $surface; }
+.settings Switch:focus { border: none; background-tint: $primary 20%; }
+.settings .setting Label { padding: 0 1; }
+.settings .setting .label { width: 22; padding: 1 1 0 0; }
+.settings .setting Select { width: 1fr; }
+.settings .setting Input { width: 10; }
+.settings .hint { color: $text-muted; margin-top: 1; }
+.settings #logout { margin-top: 1; }
+.settings .buttons { margin-top: 1; }

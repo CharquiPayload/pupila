@@ -10,14 +10,14 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, OptionList, Static, TextArea, Tree
+from textual.widgets import Button, Checkbox, Input, Label, OptionList, Select, Static, Switch, TextArea, Tree
 from textual.widgets.option_list import Option
 from textual_image.widget import HalfcellImage, UnicodeImage
 from textual_image.renderable.tgp import Image as _TGPRenderable
 from textual_image.widget import Image as TerminalImage
 from textual_image.widget._base import Image as _BaseImage
 
-from . import media, render
+from . import config, media, render
 from .model import Event, Room
 
 if TYPE_CHECKING:
@@ -97,6 +97,49 @@ class MessageView(Vertical):
         return "video:" + url if self.ev.msgtype == "m.video" else url
 
     def compose(self) -> ComposeResult:
+        if not self.pupila.cfg.avatars:
+            yield from self._content()
+            return
+        with Horizontal(classes="with-avatar"):
+            with Vertical(classes="avatar-slot"):
+                if self.group:
+                    yield self._avatar()
+            with Vertical(classes="content"):
+                yield from self._content()
+
+    def _avatar_url(self) -> str | None:
+        return self.pupila.store.avatar_of(self.ev.sender, self.room)
+
+    def _avatar(self):
+        """The sender's profile picture, or their initial on their colour while it loads."""
+        p = self.pupila
+        url = self._avatar_url()
+        img = p.images.get("avatar:" + url) if url else None
+        if img is not None:
+            cls = IMAGE_STYLES.get(p.cfg.image_style, IMAGE_STYLES["auto"])
+            w = cls(img, classes="avatar")
+            w.styles.height = 2
+            w.styles.width = "auto"
+            return w
+        name = p.store.user_name(self.ev.sender, self.room).lstrip("@")
+        w = Static(name[:1].upper() or "?", classes="initial")
+        w.styles.background = render.color_for(self.ev.sender, p.cfg.colors)
+        return w
+
+    def _needs_avatar(self) -> bool:
+        url = self._avatar_url() if self.group and self.pupila.cfg.avatars else None
+        return bool(url) and ("avatar:" + url) not in self.pupila.images
+
+    @work(exclusive=True, group="avatar")
+    async def load_avatar(self) -> None:
+        url = self._avatar_url()
+        if not url or await self.pupila.avatar(url) is None or not self.is_mounted:
+            return
+        for slot in self.query(".avatar-slot"):
+            await slot.remove_children()
+            await slot.mount(self._avatar())
+
+    def _content(self) -> ComposeResult:
         p = self.pupila
         store, colors = p.store, p.cfg.colors
         if self.group:
@@ -131,22 +174,29 @@ class MessageView(Vertical):
         w.styles.width = "auto"
         return w
 
-    def on_mount(self) -> None:
+    def _needs_media(self) -> bool:
         if not self._has_media():
-            return
+            return False
         url = self.ev.content["url"]
-        if self._animated() and url in self.pupila.animations:
-            self._start_animation(self.pupila.animations[url])
-        elif (self._animated() and url not in self.pupila.animations) or \
-                self._still_key() not in self.pupila.images:
+        if self._animated():
+            return url not in self.pupila.animations
+        return self._still_key() not in self.pupila.images
+
+    def on_mount(self) -> None:
+        if self._has_media() and self._animated() and self.ev.content["url"] in self.pupila.animations:
+            self._start_animation(self.pupila.animations[self.ev.content["url"]])
+        if self._needs_media() or self._needs_avatar():
             self.set_timer(0.1, self._load_when_visible)
 
     def _load_when_visible(self) -> None:
-        """Pictures and GIFs load when they scroll into view, not all at once."""
+        """Pictures, GIFs and profile pictures load when they scroll into view, not all at once."""
         if not self.is_mounted:
             return
         if self.is_on_screen:
-            self.load_media()
+            if self._needs_avatar():
+                self.load_avatar()
+            if self._needs_media():
+                self.load_media()
         else:
             self.set_timer(0.5, self._load_when_visible)
 
@@ -567,6 +617,92 @@ class ReactionPicker(ModalScreen[str | None]):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value.strip() or None)
+
+
+class Settings(ModalScreen["config.Config | None"]):
+    """Ctrl+S: the same settings as config.toml, with switches."""
+
+    BINDINGS = [("escape", "dismiss(None)", "Close")]
+
+    def __init__(self, cfg: "config.Config", spaces: list[str], account: str) -> None:
+        super().__init__()
+        self.cfg, self.spaces, self.account = cfg, spaces, account
+
+    @staticmethod
+    def _switch(key: str, label: str, value: bool) -> Horizontal:
+        return Horizontal(Switch(value=value, id=key), Label(label), classes="setting")
+
+    @staticmethod
+    def _choice(key: str, label: str, options: list[tuple[str, str]], value: str) -> Horizontal:
+        return Horizontal(Label(label, classes="label"),
+                          Select(options, value=value, allow_blank=False, id=key), classes="setting")
+
+    def compose(self) -> ComposeResult:
+        c = self.cfg
+        with Vertical(classes="dialog settings"):
+            yield Static("Settings", classes="title")
+            with VerticalScroll(classes="settings-body"):
+                yield Static("Notifications", classes="section")
+                yield self._switch("notify", "Desktop notifications", c.notify)
+                yield self._switch("notify_text", "Show the message in them", c.notify_text)
+                yield self._switch("bell", "Also ring the terminal bell", c.bell)
+                yield Static("Pictures", classes="section")
+                yield self._switch("images", "Show pictures in the chat", c.images)
+                yield self._switch("avatars", "Show profile pictures", c.avatars)
+                yield self._switch("animate", "Animate GIFs", c.animate)
+                yield self._choice("image_style", "Drawn", [
+                    ("sharp when the terminal can", "auto"), ("with coloured blocks", "blocks"),
+                    ("with characters", "text")], c.image_style)
+                yield Horizontal(Label("Height in lines", classes="label"),
+                                 Input(str(c.image_height), type="integer", id="image_height"),
+                                 classes="setting")
+                yield Static("Videos", classes="section")
+                yield self._choice("video_player", "A click on a video", [
+                    ("plays it in the chat", "chat"), ("plays it full screen here (mpv)", "terminal"),
+                    ("opens it in a window", "window")], c.video_player)
+                if self.spaces:
+                    yield Static("Rooms", classes="section")
+                    yield Static("Spaces sorted by name (the rest go by recent activity):", classes="hint")
+                    for name in self.spaces:
+                        yield Checkbox(name, value=name in c.sort_by_name, classes="sort-space")
+                yield Static("Account", classes="section")
+                yield Static(self.account, classes="hint")
+                yield Button("Log out", variant="error", id="logout")
+                yield Static(f"The look (colours, sizes) goes in {config.STYLE_FILE}, reloaded live.",
+                             classes="hint")
+            with Horizontal(classes="buttons"):
+                yield Button("Save", variant="primary", id="save")
+                yield Button("Cancel", id="cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "cancel":
+            self.dismiss(None)
+        elif event.button.id == "logout":
+            self.app.post_message(LogoutRequested())
+            self.dismiss(None)
+        elif event.button.id == "save":
+            self.dismiss(self._collected())
+
+    def _collected(self) -> "config.Config":
+        def on(key: str) -> bool:
+            return self.query_one(f"#{key}", Switch).value
+
+        try:
+            height = max(2, min(60, int(self.query_one("#image_height", Input).value)))
+        except ValueError:
+            height = self.cfg.image_height
+        return config.Config(
+            notify=on("notify"), notify_text=on("notify_text"), bell=on("bell"),
+            images=on("images"), avatars=on("avatars"), animate=on("animate"),
+            image_style=str(self.query_one("#image_style", Select).value), image_height=height,
+            video_player=str(self.query_one("#video_player", Select).value),
+            sort_by_name=[str(cb.label) for cb in self.query(".sort-space").results(Checkbox) if cb.value],
+            colors=dict(self.cfg.colors),
+        )
+
+
+class LogoutRequested(Message):
+    pass
 
 
 class Login(ModalScreen[dict | None]):

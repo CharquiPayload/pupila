@@ -45,6 +45,7 @@ style = "{image_style}"           # "auto": sharp if the terminal can (kitty, fo
                          # "blocks": always coloured blocks, pixel-art style
                          # "text": drawn with characters, the most retro
 animate = {animate}          # GIFs move inside the chat (Discord/WhatsApp ones need ffmpeg)
+avatars = {avatars}          # profile pictures next to messages
 
 [videos]
 # What clicking a video does:
@@ -71,6 +72,7 @@ class Config:
     image_height: int = 12
     image_style: str = "auto"
     animate: bool = True
+    avatars: bool = True
     video_player: str = "chat"
     sort_by_name: list[str] = field(default_factory=list)
     colors: dict[str, str] = field(default_factory=dict)
@@ -82,7 +84,7 @@ class Config:
         return TEMPLATE.format(
             notify=b(self.notify), notify_text=b(self.notify_text), bell=b(self.bell),
             images=b(self.images), image_height=self.image_height, image_style=self.image_style,
-            animate=b(self.animate), video_player=self.video_player,
+            animate=b(self.animate), avatars=b(self.avatars), video_player=self.video_player,
             sort_by_name=json.dumps(self.sort_by_name, ensure_ascii=False),
             colors="".join(f'"{k}" = "{v}"\n' for k, v in self.colors.items()),
         )
@@ -121,9 +123,17 @@ def load() -> Config:
         notify=n.get("enabled", True), notify_text=n.get("show_text", True), bell=n.get("bell", False),
         images=i.get("enabled", True), image_height=int(i.get("height", 12)),
         image_style=str(i.get("style", "auto")), animate=bool(i.get("animate", True)),
+        avatars=bool(i.get("avatars", True)),
         video_player=str(v.get("player", "chat")), sort_by_name=list(r.get("sort_by_name", [])),
         colors=dict(d.get("colors", {})),
     )
+
+
+def save(cfg: Config) -> None:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = CONFIG_FILE.with_suffix(".tmp")
+    tmp.write_text(cfg.to_toml())
+    tmp.replace(CONFIG_FILE)
 
 
 def _migrate_state() -> None:

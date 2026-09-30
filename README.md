@@ -43,6 +43,7 @@ with `style = "blocks"` in the `[images]` section of `config.toml`.
 | `Ctrl+V` | paste (if the clipboard holds an image, it's sent) |
 | `Esc` | cancel a reply or an edit |
 | `Ctrl+B` | show or hide the room sidebar |
+| `Ctrl+S` | settings |
 | `Ctrl+Q` | quit |
 
 **Click a message** to reply, react, copy, edit, delete, open its file or save it to your
@@ -50,7 +51,7 @@ Downloads folder.
 **Click an image or GIF** to open it large; **click a video** to play it right there.
 **Drag a file** onto the terminal to send it.
 
-Commands: `/me action`, `/upload path`, `/help`. To send something that starts with `/`,
+Commands: `/me action`, `/upload path`, `/settings`, `/help`. To send something that starts with `/`,
 type `//`.
 
 ## GIFs and videos
@@ -70,8 +71,10 @@ instantly while you use Pupila and are gone after the next reboot. To keep one, 
 
 ## Customising
 
-- `~/.config/pupila/config.toml`: notifications, images, videos, room order and people's
-  colours. Created on first run, with comments.
+- **`Ctrl+S`** opens the settings: notifications, pictures, profile pictures, GIFs, videos,
+  which spaces sort their rooms by name, and logging out.
+- `~/.config/pupila/config.toml`: the same settings as a file (plus people's colours).
+  Created on first run, with comments.
 - `~/.config/pupila/pupila.tcss`: the look (colours, widths, margins), in Textual's CSS.
   It's applied on top of the built-in one ([`src/pupila/pupila.tcss`](src/pupila/pupila.tcss))
   and reloaded live while Pupila is running. For example:

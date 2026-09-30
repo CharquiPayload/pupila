@@ -162,11 +162,11 @@ class Matrix:
         return await self._request("GET", f"{MEDIA}/download/{q(server)}/{q(media_id)}",
                                    timeout=300, raw=True)
 
-    async def thumbnail(self, mxc: str, width: int = 640, height: int = 480) -> bytes:
+    async def thumbnail(self, mxc: str, width: int = 640, height: int = 480, method: str = "scale") -> bytes:
         server, media_id = mxc_parts(mxc)
         try:
             return await self._request("GET", f"{MEDIA}/thumbnail/{q(server)}/{q(media_id)}", params={
-                "width": str(width), "height": str(height), "method": "scale"}, timeout=60, raw=True)
+                "width": str(width), "height": str(height), "method": method}, timeout=60, raw=True)
         except MatrixError:
             return await self.download(mxc)
 

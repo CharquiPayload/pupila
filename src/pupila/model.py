@@ -59,6 +59,7 @@ class Room:
     is_space: bool = False
     children: dict[str, dict] = field(default_factory=dict)  # room_id -> m.space.child content
     members: dict[str, str] = field(default_factory=dict)  # user_id -> displayname
+    avatars: dict[str, str] = field(default_factory=dict)  # user_id -> avatar mxc
     heroes: list[str] = field(default_factory=list)
     member_count: int = 0
     events: list[Event] = field(default_factory=list)
@@ -103,6 +104,7 @@ class Store:
         self.rooms: dict[str, Room] = {}
         self.directs: dict[str, str] = {}  # room_id -> user_id
         self.names: dict[str, str] = {}    # user_id -> displayname seen in any room
+        self.avatars: dict[str, str] = {}  # user_id -> avatar mxc seen in any room
         self.reactions: dict[str, tuple[str, str, str]] = {}  # reaction id -> (event, key, sender)
 
     # --- names ---
@@ -113,6 +115,11 @@ class Store:
         if self.names.get(user_id):
             return self.names[user_id]
         return user_id.split(":")[0].lstrip("@")
+
+    def avatar_of(self, user_id: str, room: Room | None = None) -> str | None:
+        if room and user_id in room.avatars:
+            return room.avatars[user_id]
+        return self.avatars.get(user_id)
 
     def room_name(self, room: Room) -> str:
         if room.name:
@@ -235,6 +242,12 @@ class Store:
                 room.members[k] = name
                 if name:
                     self.names[k] = name
+                avatar = content.get("avatar_url") or ""
+                if avatar.startswith("mxc://"):
+                    room.avatars[k] = avatar
+                    self.avatars[k] = avatar
+                else:
+                    room.avatars.pop(k, None)
             else:
                 room.members.pop(k, None)
         return False

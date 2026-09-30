@@ -25,7 +25,8 @@ from textual.widgets import Footer, Static
 from . import config, media, render
 from .matrix import Matrix, MatrixError, retry
 from .model import Changes, Event, Store
-from .widgets import Composer, Confirm, Login, Menu, MessageView, ReactionPicker, Sidebar, Timeline
+from .widgets import (Composer, Confirm, Login, LogoutRequested, Menu, MessageView, ReactionPicker, Settings,
+                      Sidebar, Timeline)
 
 BUILTIN_STYLE = Path(__file__).with_name("pupila.tcss")
 
@@ -76,6 +77,7 @@ class Pupila(App):
         Binding("alt+down", "move(1)", "Next room", show=False, priority=True),
         Binding("ctrl+r", "reply_last", "Reply", priority=True),
         Binding("ctrl+b", "sidebar", "Sidebar", priority=True),
+        Binding("ctrl+s", "settings", "Settings", priority=True),
         Binding("escape", "cancel", "Cancel", show=False),
         Binding("ctrl+q", "quit", "Quit", priority=True),
     ]
@@ -320,6 +322,37 @@ class Pupila(App):
     def action_sidebar(self) -> None:
         self.query_one(Sidebar).toggle_class("-hidden")
 
+    # ------------------------------------------------------------------ settings
+
+    def action_settings(self) -> None:
+        spaces = sorted({self.store.room_name(r) for r in self.store.rooms.values() if r.is_space}) \
+            if self.store else []
+        account = f"Logged in as {self.mx.user_id} on {self.mx.homeserver}" if self.mx else "Not logged in"
+        self.push_screen(Settings(self.cfg, spaces, account), self._apply_settings)
+
+    def _apply_settings(self, cfg: config.Config | None) -> None:
+        if cfg is None:
+            return
+        config.save(cfg)
+        self.cfg = cfg
+        self.notify("Settings saved.", timeout=2)
+        self.query_one(Sidebar).rebuild(self)
+        if self.store and self.current in self.store.rooms:
+            self.open_room(self.current)  # draws the room again with the new settings
+
+    @on(LogoutRequested)
+    @work(exclusive=True, group="logout")
+    async def _logout(self) -> None:
+        if not await self.push_screen_wait(Confirm(
+                "Log out of this device? You'll need your password to come back.", "Log out", "Cancel")):
+            return
+        try:
+            await self.mx.logout()
+        except (MatrixError, httpx.HTTPError):
+            pass  # the local session goes anyway
+        config.delete_session()
+        self.exit(message="Logged out.")
+
     @on(Timeline.LoadHistory)
     async def _load_history(self) -> None:
         timeline = self.query_one(Timeline)
@@ -487,8 +520,10 @@ class Pupila(App):
             await self.upload(Path(rest).expanduser())
         elif name == "quit":
             self.exit()
+        elif name == "settings":
+            self.action_settings()
         elif name == "help":
-            self.notify("/me action · /upload path · //text sends something starting with / · "
+            self.notify("/me action · /upload path · /settings · //text sends something starting with / · "
                         "Ctrl+V pastes images · ↑ edits your last message · click a message: "
                         "reply, react, delete…", timeout=12)
         else:
@@ -618,6 +653,28 @@ class Pupila(App):
             self.log(f"image {mxc}: {e}")
             img = None
         self.images[mxc] = img
+        return img
+
+    async def avatar(self, mxc: str) -> PILImage.Image | None:
+        """A profile picture, small and square."""
+        key = "avatar:" + mxc
+        if key in self.images:
+            return self.images[key]
+        cache = config.media_dir() / "avatars" / mxc.removeprefix("mxc://").replace("/", "_")
+        try:
+            if cache.exists():
+                data = cache.read_bytes()
+            else:
+                data = await self.mx.thumbnail(mxc, 96, 96, "crop")
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                cache.write_bytes(data)
+            img = PILImage.open(io.BytesIO(data))
+            img.load()
+            img = img.convert("RGBA")
+        except Exception as e:  # broken image, network
+            self.log(f"avatar {mxc}: {e}")
+            img = None
+        self.images[key] = img
         return img
 
     async def download(self, ev: Event) -> Path | None:
