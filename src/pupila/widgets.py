@@ -13,7 +13,9 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, Static, TextArea, Tree
 from textual.widgets.option_list import Option
 from textual_image.widget import HalfcellImage, UnicodeImage
+from textual_image.renderable.tgp import Image as _TGPRenderable
 from textual_image.widget import Image as TerminalImage
+from textual_image.widget._base import Image as _BaseImage
 
 from . import media, render
 from .model import Event, Room
@@ -22,7 +24,37 @@ if TYPE_CHECKING:
     from .app import Pupila
 
 MEDIA_TYPES = {"m.image", "m.sticker", "m.video"}
-IMAGE_STYLES = {"auto": TerminalImage, "blocks": HalfcellImage, "text": UnicodeImage}
+
+
+class KittyImage(_BaseImage, Renderable=_TGPRenderable):
+    """An image widget for kitty's graphics protocol that doesn't blink between frames.
+
+    textual-image deletes the old picture from the terminal before the new one is on screen,
+    so every GIF frame showed a black gap. Here the old picture is deleted a moment later,
+    once the new one has replaced it.
+    """
+
+    def render(self):
+        old, self._renderable = self._renderable, None
+        result = super().render()
+        if old is not None:
+            self.app.set_timer(0.25, old.cleanup)
+        return result
+
+    def on_unmount(self) -> None:
+        if self._renderable is not None:
+            self.app.set_timer(0.25, self._renderable.cleanup)
+            self._renderable = None
+
+
+def _auto_image_class():
+    from textual_image.renderable import Image as Detected
+    from textual_image.renderable import TGPImage
+
+    return KittyImage if Detected is TGPImage else TerminalImage
+
+
+IMAGE_STYLES = {"auto": _auto_image_class(), "blocks": HalfcellImage, "text": UnicodeImage}
 
 
 # --------------------------------------------------------------------------- messages
@@ -93,7 +125,7 @@ class MessageView(Vertical):
             yield Static(r, classes="reactions")
 
     def _picture(self, img):
-        cls = IMAGE_STYLES.get(self.pupila.cfg.image_style, TerminalImage)
+        cls = IMAGE_STYLES.get(self.pupila.cfg.image_style, IMAGE_STYLES["auto"])
         w = cls(img, classes="image media")
         w.styles.height = self.pupila.cfg.image_height
         w.styles.width = "auto"
