@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -548,6 +549,59 @@ class Sidebar(Tree[str]):
             stack.extend(n.children)
 
 
+# --------------------------------------------------------------------------- attachments
+
+
+@dataclass
+class Attachment:
+    """A file waiting to be sent: pasted, dragged in or added with /upload."""
+
+    data: bytes
+    content_type: str
+    name: str
+    preview: object | None = None  # a PIL image, for pictures
+
+
+class AttachmentTray(Horizontal):
+    """What you're about to send, above the composer, like Discord's."""
+
+    class Removed(Message):
+        def __init__(self, index: int) -> None:
+            super().__init__()
+            self.index = index
+
+    async def show(self, items: list[Attachment], style: str) -> None:
+        await self.remove_children()
+        cards = []
+        for i, a in enumerate(items):
+            card = Vertical(classes="attachment")
+            parts: list = []
+            if a.preview is not None:
+                img = IMAGE_STYLES.get(style, IMAGE_STYLES["auto"])(a.preview, classes="attachment-picture")
+                img.styles.height = 5
+                img.styles.width = min(24, cells_wide(a.preview, 5))
+                parts.append(img)
+            else:
+                icon = "🎞" if a.content_type.startswith("video/") else \
+                    "🎵" if a.content_type.startswith("audio/") else "📄"
+                parts.append(Static(icon, classes="attachment-icon"))
+            name = a.name if len(a.name) <= 22 else a.name[:10] + "…" + a.name[-10:]
+            parts.append(Static(Text.assemble((name, "bold"), ("  " + render.human_size(len(a.data)), "dim")),
+                                classes="attachment-name"))
+            remove = Static("✕", classes="attachment-remove", name=str(i))
+            cards.append((card, parts, remove))
+        for card, parts, remove in cards:
+            await self.mount(card)
+            await card.mount(remove, *parts)
+        self.display = bool(items)
+
+    def on_click(self, event) -> None:
+        w = event.widget
+        if w is not None and w.has_class("attachment-remove"):
+            event.stop()
+            self.post_message(self.Removed(int(w.name or 0)))
+
+
 # --------------------------------------------------------------------------- composer
 
 
@@ -578,8 +632,7 @@ class Composer(TextArea):
         if key == "enter":
             event.stop()
             event.prevent_default()
-            if self.text.strip():
-                self.post_message(self.Submitted(self.text))
+            self.post_message(self.Submitted(self.text))  # empty is fine when there are attachments
             return
         if key in ("shift+enter", "alt+enter", "ctrl+j"):
             event.stop()

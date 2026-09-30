@@ -27,8 +27,8 @@ from . import config, media, render
 from .matrix import Matrix, MatrixError, retry
 from .model import Changes, Event, Store
 from .emoji import EmojiPicker
-from .widgets import (Composer, Confirm, ContextMenu, Login, LogoutRequested, MessageView, Settings, Sidebar,
-                      Timeline)
+from .widgets import (Attachment, AttachmentTray, Composer, Confirm, ContextMenu, Login, LogoutRequested,
+                      MessageView, Settings, Sidebar, Timeline)
 
 BUILTIN_STYLE = Path(__file__).with_name("pupila.tcss")
 
@@ -96,6 +96,7 @@ class Pupila(App):
         self.connected = False
         self.images: dict[str, PILImage.Image | None] = {}
         self.animations: OrderedDict[str, list] = OrderedDict()  # url -> [(frame, seconds)]
+        self.pending: list[Attachment] = []  # files waiting in the tray above the composer
         self.replying: Event | None = None
         self.editing: Event | None = None
         self._read: dict[str, str] = {}
@@ -113,15 +114,17 @@ class Pupila(App):
                 yield Timeline(id="timeline")
                 yield Static(id="typing")
                 yield Static(id="action")
+                yield AttachmentTray(id="attachments")
                 with Horizontal(id="compose-row"):
                     yield Composer(id="composer")
-                    yield Button("☺", id="emoji-button")
+                    yield Button("😀", id="emoji-button")
         yield Footer()
 
     async def on_mount(self) -> None:
         self.register_theme(THEME)
         self.theme = "pupila"
         await self.query_one(Timeline).show(None)
+        self.query_one(AttachmentTray).display = False
         self.paint_header()
         session = config.read_session()
         if session:
@@ -480,14 +483,23 @@ class Pupila(App):
             self.notify("Open a room first.", severity="warning")
             return
         composer = self.query_one(Composer)
-        text = event.text.rstrip()
+        text = event.text.strip()
+        if not text and not self.pending:
+            return
         composer.clear()
         if text.startswith("/") and not text.startswith("//"):
             await self.command(text)
             return
         if text.startswith("//"):
             text = text[1:]
-        await self.send_text(self.current, text)
+        if self.pending:
+            rid, files = self.current, self.pending
+            self.pending = []
+            await self._show_tray()
+            for a in files:
+                await self.send_file(rid, a)
+        if text:
+            await self.send_text(self.current, text)
 
     async def send_text(self, rid: str, text: str, msgtype: str = "m.text") -> None:
         content: dict = {"msgtype": msgtype, "body": text}
@@ -538,7 +550,7 @@ class Pupila(App):
         if name == "me" and rest:
             await self.send_text(self.current, rest, "m.emote")
         elif name == "upload" and rest:
-            await self.upload(Path(rest).expanduser())
+            await self.attach_path(Path(rest).expanduser())
         elif name == "quit":
             self.exit()
         elif name == "settings":
@@ -550,12 +562,15 @@ class Pupila(App):
         else:
             self.notify(f"Unknown command /{name}. Try /help (or // to send it as text).", severity="warning")
 
-    def action_cancel(self) -> None:
+    async def action_cancel(self) -> None:
         if self.editing or self.replying:
             if self.editing:
                 self.query_one(Composer).clear()
             self.editing = self.replying = None
             self.paint_action()
+        elif self.pending:  # Esc with nothing else going on empties the tray
+            self.pending = []
+            await self._show_tray()
         self.query_one(Composer).focus()
 
     @on(Button.Pressed, "#emoji-button")
@@ -824,46 +839,59 @@ class Pupila(App):
     async def _open_media(self, event: MessageView.Open) -> None:
         await self.open_file(event.view.ev)
 
-    async def upload(self, path: Path | None = None, data: bytes | None = None,
-                     content_type: str | None = None, name: str | None = None) -> None:
-        rid = self.current
-        if not rid:
-            return
-        if path is not None:
-            if not path.is_file():
-                self.notify(f"{path} doesn't exist", severity="error")
-                return
-            data, name = path.read_bytes(), path.name
-        assert data is not None and name
+    # --- the tray of files waiting to be sent ---
+
+    async def _show_tray(self) -> None:
+        await self.query_one(AttachmentTray).show(self.pending, self.cfg.image_style)
+
+    async def attach(self, data: bytes, content_type: str | None, name: str) -> None:
         content_type = content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
-        info: dict = {"mimetype": content_type, "size": len(data)}
-        msgtype = "m.file"
+        preview = None
         if content_type.startswith("image/"):
-            msgtype = "m.image"
             try:
-                with PILImage.open(io.BytesIO(data)) as im:
-                    info["w"], info["h"] = im.size
+                preview = PILImage.open(io.BytesIO(data))
+                preview.load()
             except Exception:
-                pass
+                preview = None
         elif content_type.startswith("video/"):
-            msgtype = "m.video"
-        elif content_type.startswith("audio/"):
-            msgtype = "m.audio"
-        self.notify(f"Uploading {name} ({render.human_size(len(data))})…", timeout=3)
-        try:
-            mxc = await self.mx.upload(data, content_type, name)
-        except (MatrixError, httpx.HTTPError) as e:
-            self.notify(f"Couldn't upload: {e}", severity="error")
+            preview = await media.first_frame(data)
+        self.pending.append(Attachment(data, content_type, name, preview))
+        await self._show_tray()
+        self.query_one(Composer).focus()
+
+    async def attach_path(self, path: Path) -> None:
+        if not path.is_file():
+            self.notify(f"{path} doesn't exist", severity="error")
             return
-        content = {"msgtype": msgtype, "body": name, "filename": name, "url": mxc, "info": info}
-        if msgtype == "m.image":
-            try:
-                img = PILImage.open(io.BytesIO(data))
-                img.load()
-                self.images[mxc] = img
-            except Exception:
-                pass
-        await self.send_content(rid, content)
+        await self.attach(await asyncio.to_thread(path.read_bytes), None, path.name)
+
+    @on(AttachmentTray.Removed)
+    async def _unattach(self, event: AttachmentTray.Removed) -> None:
+        if 0 <= event.index < len(self.pending):
+            self.pending.pop(event.index)
+            await self._show_tray()
+
+    async def send_file(self, rid: str, a: Attachment) -> None:
+        info: dict = {"mimetype": a.content_type, "size": len(a.data)}
+        msgtype = "m.file"
+        if a.content_type.startswith("image/"):
+            msgtype = "m.image"
+            if a.preview is not None:
+                info["w"], info["h"] = a.preview.size
+        elif a.content_type.startswith("video/"):
+            msgtype = "m.video"
+        elif a.content_type.startswith("audio/"):
+            msgtype = "m.audio"
+        self.notify(f"Uploading {a.name} ({render.human_size(len(a.data))})…", timeout=3)
+        try:
+            mxc = await self.mx.upload(a.data, a.content_type, a.name)
+        except (MatrixError, httpx.HTTPError) as e:
+            self.notify(f"Couldn't upload {a.name}: {e}", severity="error")
+            return
+        if msgtype == "m.image" and a.preview is not None:
+            self.images[mxc] = a.preview
+        await self.send_content(rid, {"msgtype": msgtype, "body": a.name, "filename": a.name,
+                                      "url": mxc, "info": info})
 
     @on(Composer.Paste)
     @work(exclusive=True, group="paste")
@@ -874,10 +902,9 @@ class Pupila(App):
             image = next((t for t in types.decode(errors="replace").split() if t.startswith("image/")), None)
             if image:
                 _, data = await self._run("wl-paste", "--type", image)
-                if data and await self.push_screen_wait(Confirm(
-                        f"Send the image on the clipboard ({render.human_size(len(data))})?", "Send", "No")):
+                if data:
                     ext = mimetypes.guess_extension(image) or ".png"
-                    await self.upload(data=data, content_type=image, name=f"image{ext}")
+                    await self.attach(data, image, f"image{ext}")
                 return
             _, text = await self._run("wl-paste", "--no-newline")
         elif shutil.which("xclip"):
@@ -889,9 +916,5 @@ class Pupila(App):
             composer.insert(text.decode(errors="replace"))
 
     @on(Composer.FileDropped)
-    @work(exclusive=True, group="paste")
     async def _file_dropped(self, event: Composer.FileDropped) -> None:
-        p = event.path
-        if await self.push_screen_wait(Confirm(f"Send {p.name} ({render.human_size(p.stat().st_size)})?",
-                                               "Send", "No")):
-            await self.upload(p)
+        await self.attach_path(event.path)

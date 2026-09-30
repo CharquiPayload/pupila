@@ -40,7 +40,7 @@ with `style = "blocks"` in the `[images]` section of `config.toml`.
 | `Alt+↑` / `Alt+↓` | previous / next room |
 | `↑` (with the composer empty) | edit your last message |
 | `Ctrl+R` | reply to the last message from someone else |
-| `Ctrl+V` | paste (if the clipboard holds an image, it's sent) |
+| `Ctrl+V` | paste (an image on the clipboard goes to the tray above the composer) |
 | `Esc` | cancel a reply or an edit |
 | `Ctrl+B` | show or hide the room sidebar |
 | `Ctrl+S` | settings |
@@ -53,7 +53,9 @@ Downloads folder.
 smile…), browse by category or pick from your most used ones.
 **Drag over text** to select it and `Ctrl+C` to copy it.
 **Click an image or GIF** to open it large; **click a video** to play it right there.
-**Drag a file** onto the terminal to send it.
+**Drag a file** onto the terminal, paste an image or use `/upload path` and it waits in a tray
+above the composer, like Discord's: `Enter` sends it along with your message, its ✕ takes it
+out and `Esc` empties the tray.
 
 Commands: `/me action`, `/upload path`, `/settings`, `/help`. To send something that starts with `/`,
 type `//`.

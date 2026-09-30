@@ -34,6 +34,26 @@
 #action { height: auto; padding: 0 2; display: none; }
 #action.-visible { display: block; }
 #compose-row { height: auto; margin: 0 1; }
+#attachments { height: auto; margin: 0 1; padding: 0; }
+#attachments .attachment {
+    width: auto;
+    min-width: 16;
+    max-width: 36;
+    height: auto;
+    margin-right: 1;
+    padding: 0 1;
+    border: round $primary 60%;
+    background: $surface;
+}
+#attachments .attachment-remove {
+    dock: right;
+    width: 1;
+    height: 1;
+    color: $error;
+    text-style: bold;
+}
+#attachments .attachment-icon { height: 1; width: auto; }
+#attachments .attachment-name { width: auto; height: 1; }
 #composer {
     width: 1fr;
     height: auto;
@@ -44,14 +64,15 @@
 }
 #composer:focus { border: round $primary; }
 #emoji-button {
-    width: 6;
-    min-width: 6;
+    width: 8;
+    min-width: 8;
     height: 3;
     margin-left: 1;
+    padding: 0;
     border: round $primary 60%;
     background: $surface;
-    color: $primary;
-    text-style: bold;
+    content-align: center middle;
+    text-align: center;
 }
 #emoji-button:hover { border: round $primary; background: $primary 20%; }
 #emoji-button:focus { text-style: bold; }
