@@ -96,6 +96,7 @@ class Pupila(App):
         self._read: dict[str, str] = {}
         self._typing_until = 0.0
         self._sidebar_pending = False
+        self.media_slots = asyncio.Semaphore(2)  # downloads and decodes at once: the rest wait
 
     # ------------------------------------------------------------------ screen
 
@@ -639,18 +640,20 @@ class Pupila(App):
             return self.animations[url]
         if (media.info(ev).get("size") or 0) > 20 * 1024 * 1024:
             return None
-        path = await self.download(ev)
-        if not path:
-            return None
-        data = path.read_bytes()
-        try:
-            if ev.msgtype == "m.video":
-                frames = await media.video_frames(data)
-            else:
-                frames = await asyncio.to_thread(media.gif_frames, data)
-        except Exception as e:  # broken GIF, odd video
-            self.log(f"animation {url}: {e}")
-            frames = []
+        async with self.media_slots:
+            if url in self.animations:  # another message with the same GIF got it meanwhile
+                return self.animations[url]
+            path = await self.download(ev)
+            if not path:
+                return None
+            try:
+                if ev.msgtype == "m.video":
+                    frames = await media.video_frames(path)
+                else:
+                    frames = await asyncio.to_thread(media.gif_frames, path.read_bytes())
+            except Exception as e:  # broken GIF, odd video
+                self.log(f"animation {url}: {e}")
+                frames = []
         if not frames:
             return None
         self.animations[url] = frames
@@ -667,9 +670,10 @@ class Pupila(App):
         if thumb:
             img = await self.image(thumb)
         elif (media.info(ev).get("size") or 0) <= 25 * 1024 * 1024:
-            path = await self.download(ev)
-            if path:
-                img = await media.first_frame(path.read_bytes())
+            async with self.media_slots:
+                path = await self.download(ev)
+                if path:
+                    img = await media.first_frame(path.read_bytes())
         self.images[key] = img
         return img
 

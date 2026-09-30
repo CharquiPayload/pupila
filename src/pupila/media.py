@@ -21,9 +21,9 @@ from PIL import Image, ImageSequence
 from .model import Event
 
 WIDTH = 320        # px: plenty for 12 terminal lines
-MAX_FRAMES = 90
-MAX_SECONDS = 10
-VIDEO_FPS = 10
+MAX_FRAMES = 60
+MAX_SECONDS = 8
+ANIMATION_FPS = 10  # GIFs are drawn at most this often: more only makes the terminal work harder
 
 
 def info(ev: Event) -> dict:
@@ -59,16 +59,45 @@ def _shrink(im: Image.Image) -> Image.Image:
     return im
 
 
+def _cap_rate(frames: list[tuple[Image.Image, float]]) -> list[tuple[Image.Image, float]]:
+    """Merges frames that come faster than ANIMATION_FPS, keeping the total time.
+
+    Frames are kept on a 1/ANIMATION_FPS grid, so a GIF at 11 fps stays at about 10.
+    """
+    step = 1 / ANIMATION_FPS
+    out: list[list] = []
+    t = next_slot = 0.0
+    for frame, lasts in frames:
+        if not out or t >= next_slot - 1e-6:
+            out.append([frame, lasts])
+            next_slot = (int(t / step + 1e-6) + 1) * step
+        else:
+            out[-1][1] += lasts
+        t += lasts
+    return [(f, d) for f, d in out]
+
+
 def gif_frames(data: bytes) -> list[tuple[Image.Image, float]]:
-    """(frame, seconds it lasts) for a GIF."""
-    out = []
+    """(frame, seconds it lasts) for a GIF. Runs in a thread: decoding is slow."""
+    raw = []
     with Image.open(io.BytesIO(data)) as im:
         for n, frame in enumerate(ImageSequence.Iterator(im)):
-            if n >= MAX_FRAMES:
+            if n >= MAX_FRAMES * 3:
                 break
             lasts = (frame.info.get("duration") or 100) / 1000
-            out.append((_shrink(frame.copy()), max(lasts, 0.04)))
-    return out
+            raw.append((frame.copy(), max(lasts, 0.02)))
+    return [(_shrink(f), d) for f, d in _cap_rate(raw)[:MAX_FRAMES]]
+
+
+async def _read_ppm(stream: asyncio.StreamReader) -> Image.Image:
+    """One frame from an ffmpeg `-f image2pipe -vcodec ppm` stream."""
+    magic = (await stream.readline()).strip()
+    if magic != b"P6":
+        raise asyncio.IncompleteReadError(magic, None)
+    width, height = (int(x) for x in (await stream.readline()).split())
+    await stream.readline()  # maximum value, always 255
+    data = await stream.readexactly(width * height * 3)
+    return Image.frombytes("RGB", (width, height), data)
 
 
 async def _ffmpeg_frames(data: bytes, *args: str) -> list[Image.Image]:
@@ -92,10 +121,26 @@ async def _ffmpeg_frames(data: bytes, *args: str) -> list[Image.Image]:
         return out
 
 
-async def video_frames(data: bytes) -> list[tuple[Image.Image, float]]:
-    frames = await _ffmpeg_frames(data, "-t", str(MAX_SECONDS), "-vf", f"fps={VIDEO_FPS},scale={WIDTH}:-2",
-                                  "-frames:v", str(MAX_FRAMES))
-    return [(f, 1 / VIDEO_FPS) for f in frames]
+async def video_frames(path: Path) -> list[tuple[Image.Image, float]]:
+    """Frames of a short video (a Discord/WhatsApp GIF), read straight from ffmpeg's output."""
+    if not shutil.which("ffmpeg"):
+        return []
+    p = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-v", "error", "-nostdin", "-t", str(MAX_SECONDS), "-i", str(path),
+        "-vf", f"fps={ANIMATION_FPS},scale={WIDTH}:-2", "-frames:v", str(MAX_FRAMES),
+        "-f", "image2pipe", "-vcodec", "ppm", "-",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+    frames = []
+    try:
+        while True:
+            frames.append((await _read_ppm(p.stdout), 1 / ANIMATION_FPS))
+    except (asyncio.IncompleteReadError, ValueError):
+        pass
+    finally:
+        if p.returncode is None:
+            p.kill()
+        await p.wait()
+    return frames
 
 
 async def first_frame(data: bytes) -> Image.Image | None:
@@ -187,14 +232,7 @@ class InlinePlayer:
         return now - self._t0 - self._paused_total
 
     async def _read_frame(self) -> Image.Image:
-        out = self._video.stdout
-        magic = (await out.readline()).strip()
-        if magic != b"P6":
-            raise asyncio.IncompleteReadError(magic, None)
-        width, height = (int(x) for x in (await out.readline()).split())
-        await out.readline()  # maximum value, always 255
-        data = await out.readexactly(width * height * 3)
-        return Image.frombytes("RGB", (width, height), data)
+        return await _read_ppm(self._video.stdout)
 
     async def _run(self) -> None:
         n = 0

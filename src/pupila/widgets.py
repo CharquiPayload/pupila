@@ -107,7 +107,16 @@ class MessageView(Vertical):
             self._start_animation(self.pupila.animations[url])
         elif (self._animated() and url not in self.pupila.animations) or \
                 self._still_key() not in self.pupila.images:
+            self.set_timer(0.1, self._load_when_visible)
+
+    def _load_when_visible(self) -> None:
+        """Pictures and GIFs load when they scroll into view, not all at once."""
+        if not self.is_mounted:
+            return
+        if self.is_on_screen:
             self.load_media()
+        else:
+            self.set_timer(0.5, self._load_when_visible)
 
     def on_unmount(self) -> None:
         if self.player:
@@ -139,7 +148,7 @@ class MessageView(Vertical):
         if not self.is_mounted or not self._frames:
             return
         self._frame = (self._frame + 1) % len(self._frames)
-        if self.is_on_screen:
+        if self.is_on_screen and self.pupila.focused_app:  # nothing moves while you look elsewhere
             self._draw(self._frames[self._frame][0])
         self.set_timer(self._frames[self._frame][1], self._next_frame)
 
