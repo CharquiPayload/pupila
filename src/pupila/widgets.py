@@ -1,9 +1,13 @@
 """The pieces of the screen: room sidebar, message timeline, composer and dialogs."""
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from rich.cells import cell_len
+from rich.console import Console
+from rich.markdown import Markdown
 from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
@@ -188,11 +192,30 @@ class MessageView(Vertical):
             if text:
                 yield Static(text, classes="body")
         else:
-            yield Static(render.body(self.ev, store, self.room), classes="body" + (
-                " notice" if self.ev.msgtype == "m.notice" else ""))
+            body = render.body(self.ev, store, self.room)
+            w = Static(body, classes="body" + (" notice" if self.ev.msgtype == "m.notice" else ""))
+            if p.cfg.bubbles and isinstance(body, (Markdown, Text)):
+                # A bubble sized by its content: Markdown would shrink it to its minimum and long
+                # text would overflow it, so measure the widest line drawn at the room's width.
+                w.styles.width = self._fit_width(body)
+            yield w
         s = render.suffix(self.ev)
         if s:
             yield Static(s, classes="suffix")
+
+    def _fit_width(self, renderable) -> int:
+        try:
+            room_width = self.app.query_one("#timeline").size.width
+        except Exception:
+            room_width = 0
+        if room_width < 20:
+            room_width = max(40, self.app.size.width - 36)
+        room_width -= 6 if self.pupila.cfg.avatars else 0
+        available = max(16, int(room_width * 0.9) - 6)  # bubble: 90%, minus border and padding
+        console = Console(width=available, file=io.StringIO(), color_system=None)
+        lines = console.render_lines(renderable, console.options.update_width(available), pad=False)
+        widest = max((cell_len("".join(seg.text for seg in line).rstrip()) for line in lines), default=1)
+        return max(1, min(available, widest))
 
     def _reactions(self) -> ComposeResult:
         r = render.reactions(self.ev, self.pupila.store.me)

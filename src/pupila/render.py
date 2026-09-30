@@ -147,7 +147,7 @@ def suffix(e: Event) -> Text | None:
         return Text("couldn't send", style="bold #f38ba8")
     if e.pending:
         return Text("sending…", style="dim italic")
-    if e.edited and not e.redacted:
+    if e.edited and not e.redacted and e.msgtype != "m.notice":  # notices are status lines: edits are noise
         return Text("(edited)", style="dim")
     return None
 
