@@ -21,14 +21,14 @@ from textual.binding import Binding
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal, Vertical
 from textual.theme import Theme
-from textual.widgets import Button, Footer, Static
+from textual.widgets import Footer, Static
 
 from . import config, media, render
 from .matrix import Matrix, MatrixError, retry
 from .model import Changes, Event, Store
 from .emoji import EmojiPicker
-from .widgets import (Attachment, AttachmentTray, Composer, Confirm, ContextMenu, Login, LogoutRequested,
-                      MessageView, Settings, Sidebar, Timeline)
+from .widgets import (Attachment, AttachmentTray, Composer, Confirm, ContextMenu, EmojiButton, Login,
+                      LogoutRequested, MessageView, Settings, Sidebar, Timeline)
 
 BUILTIN_STYLE = Path(__file__).with_name("pupila.tcss")
 
@@ -102,6 +102,7 @@ class Pupila(App):
         self._read: dict[str, str] = {}
         self._typing_until = 0.0
         self._sidebar_pending = False
+        self._fetching: dict[str, asyncio.Future] = {}  # profile pictures being downloaded
         self.media_slots = asyncio.Semaphore(2)  # downloads and decodes at once: the rest wait
 
     # ------------------------------------------------------------------ screen
@@ -117,7 +118,7 @@ class Pupila(App):
                 yield AttachmentTray(id="attachments")
                 with Horizontal(id="compose-row"):
                     yield Composer(id="composer")
-                    yield Button("😀", id="emoji-button")
+                    yield EmojiButton(id="emoji-button")
         yield Footer()
 
     async def on_mount(self) -> None:
@@ -573,7 +574,7 @@ class Pupila(App):
             await self._show_tray()
         self.query_one(Composer).focus()
 
-    @on(Button.Pressed, "#emoji-button")
+    @on(EmojiButton.Pressed)
     @work(exclusive=True, group="emoji")
     async def _emoji_button(self) -> None:
         button = self.query_one("#emoji-button")
@@ -702,10 +703,21 @@ class Pupila(App):
         return img
 
     async def avatar(self, mxc: str) -> PILImage.Image | None:
-        """A profile picture, small and square."""
+        """A profile picture, small and round. Many messages ask for the same one at once."""
         key = "avatar:" + mxc
         if key in self.images:
             return self.images[key]
+        if key in self._fetching:
+            return await asyncio.shield(self._fetching[key])
+        task = asyncio.ensure_future(self._fetch_avatar(mxc))
+        self._fetching[key] = task
+        try:
+            return await task
+        finally:
+            self._fetching.pop(key, None)
+
+    async def _fetch_avatar(self, mxc: str) -> PILImage.Image | None:
+        key = "avatar:" + mxc
         cache = config.media_dir() / "avatars" / mxc.removeprefix("mxc://").replace("/", "_")
         try:
             if cache.exists():
@@ -716,7 +728,7 @@ class Pupila(App):
                 cache.write_bytes(data)
             img = PILImage.open(io.BytesIO(data))
             img.load()
-            img = img.convert("RGBA")
+            img = media.round_avatar(img)
         except Exception as e:  # broken image, network
             self.log(f"avatar {mxc}: {e}")
             img = None

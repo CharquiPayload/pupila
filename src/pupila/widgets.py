@@ -132,15 +132,18 @@ class MessageView(Vertical):
         p = self.pupila
         url = self._avatar_url()
         img = p.images.get("avatar:" + url) if url else None
+        name = p.store.user_name(self.ev.sender, self.room).lstrip("@")
+        color = render.color_for(self.ev.sender, p.cfg.colors)
+        if img is None and media.has_graphics(p.cfg.image_style):
+            img = media.initial_avatar(name[:1].upper() or "?", color)
         if img is not None:
             cls = IMAGE_STYLES.get(p.cfg.image_style, IMAGE_STYLES["auto"])
             w = cls(img, classes="avatar")
             w.styles.height = 2
             w.styles.width = cells_wide(img, 2)
             return w
-        name = p.store.user_name(self.ev.sender, self.room).lstrip("@")
         w = Static(name[:1].upper() or "?", classes="initial")
-        w.styles.background = render.color_for(self.ev.sender, p.cfg.colors)
+        w.styles.background = color
         return w
 
     def _needs_avatar(self) -> bool:
@@ -242,7 +245,9 @@ class MessageView(Vertical):
     def on_mount(self) -> None:
         if self._has_media() and self._animated() and self.ev.content["url"] in self.pupila.animations:
             self._start_animation(self.pupila.animations[self.ev.content["url"]])
-        if self._needs_media() or self._needs_avatar():
+        if self._needs_avatar():
+            self.load_avatar()  # small and shared by many messages: no need to wait until it's in view
+        if self._needs_media():
             self.set_timer(0.1, self._load_when_visible)
 
     def _load_when_visible(self) -> None:
@@ -250,8 +255,6 @@ class MessageView(Vertical):
         if not self.is_mounted:
             return
         if self.is_on_screen:
-            if self._needs_avatar():
-                self.load_avatar()
             if self._needs_media():
                 self.load_media()
         else:
@@ -600,6 +603,28 @@ class AttachmentTray(Horizontal):
         if w is not None and w.has_class("attachment-remove"):
             event.stop()
             self.post_message(self.Removed(int(w.name or 0)))
+
+
+class EmojiButton(Vertical):
+    """The button next to the composer that opens the emoji picker: a face drawn to fill it."""
+
+    class Pressed(Message):
+        pass
+
+    def compose(self) -> ComposeResult:
+        style = self.app.cfg.image_style  # type: ignore[attr-defined]
+        if media.has_graphics(style):
+            img = media.smiley_icon()
+            w = IMAGE_STYLES["auto"](img, classes="icon")
+            w.styles.height = 3
+            w.styles.width = 8
+            yield w
+        else:
+            yield Static("☺", classes="icon-text")
+
+    def on_click(self, event) -> None:
+        event.stop()
+        self.post_message(self.Pressed())
 
 
 # --------------------------------------------------------------------------- composer

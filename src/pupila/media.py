@@ -295,3 +295,65 @@ class InlinePlayer:
         self._kill()
         if self._task and not self._task.done():
             self._task.cancel()
+
+
+def has_graphics(image_style: str) -> bool:
+    """True when the terminal draws real pictures (kitty, sixel) and the style doesn't ask for blocks."""
+    from textual_image.renderable import Image as Detected
+    from textual_image.renderable import SixelImage, TGPImage
+
+    return image_style == "auto" and Detected in (TGPImage, SixelImage)
+
+
+def round_avatar(img: Image.Image, size: int = 96) -> Image.Image:
+    """A profile picture cut into a circle, like Discord's."""
+    from PIL import ImageDraw, ImageOps
+
+    img = ImageOps.fit(img.convert("RGBA"), (size, size))
+    mask = Image.new("L", (size * 4, size * 4), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, size * 4 - 1, size * 4 - 1), fill=255)
+    img.putalpha(mask.resize((size, size), Image.LANCZOS))
+    return img
+
+
+def initial_avatar(letter: str, color: str, size: int = 96) -> Image.Image:
+    """While a profile picture loads (or when there's none): the initial on the person's colour."""
+    from PIL import ImageDraw, ImageFont
+
+    big = size * 4
+    img = Image.new("RGBA", (big, big), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    d.ellipse((0, 0, big - 1, big - 1), fill=color)
+    try:
+        font = ImageFont.load_default(size=int(big * 0.55))
+    except TypeError:  # Pillow older than 10.1
+        font = ImageFont.load_default()
+    d.text((big / 2, big / 2), letter, fill="#16141d", font=font, anchor="mm")
+    return img.resize((size, size), Image.LANCZOS)
+
+
+def smiley_icon(color: str = "#9b87f5", frame: str = "#6d5fb0", height: int = 96) -> Image.Image:
+    """The emoji button: a rounded box with a face that fills it, centred.
+
+    Drawn as a picture because a terminal can't make a character bigger. 4:3, like 8 columns
+    by 3 lines.
+    """
+    from PIL import ImageDraw
+
+    h = height * 4
+    w = h * 4 // 3
+    img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    line = h // 22
+    d.rounded_rectangle((line, line, w - line, h - line), radius=h // 5, outline=frame, width=line)
+    face = h * 0.62
+    x0, y0 = (w - face) / 2, (h - face) / 2
+    stroke = h // 16
+    d.ellipse((x0, y0, x0 + face, y0 + face), outline=color, width=stroke)
+    eye = face * 0.075
+    for cx in (x0 + face * 0.36, x0 + face * 0.64):
+        cy = y0 + face * 0.38
+        d.ellipse((cx - eye, cy - eye, cx + eye, cy + eye), fill=color)
+    d.arc((x0 + face * 0.25, y0 + face * 0.25, x0 + face * 0.75, y0 + face * 0.75),
+          start=25, end=155, fill=color, width=stroke)
+    return img.resize((w // 4, h // 4), Image.LANCZOS)
