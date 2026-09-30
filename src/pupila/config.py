@@ -40,6 +40,13 @@ alto = 12               # alto en líneas
 estilo = "auto"         # "auto": nítidas si la terminal puede (foot, kitty), bloques si no
                         # "bloques": siempre en bloques de colores, estilo pixel
                         # "texto": con caracteres, lo más retro
+animar = true           # los GIF se mueven dentro del chat (los de Discord/WhatsApp piden ffmpeg)
+
+[videos]
+# Al hacer clic en un video o GIF:
+#   "auto": mpv si está instalado; si no, el programa por defecto del sistema
+#   "terminal": dentro de la misma terminal con mpv, en bloques de colores (q para volver)
+reproductor = "auto"
 
 [salas]
 # Espacios cuyas salas van por nombre (el resto, por actividad reciente).
@@ -58,6 +65,8 @@ class Config:
     imagenes: bool = True
     alto_imagen: int = 12
     estilo_imagen: str = "auto"
+    animar: bool = True
+    reproductor: str = "auto"
     por_nombre: list[str] = field(default_factory=list)
     colores: dict[str, str] = field(default_factory=dict)
 
@@ -70,11 +79,12 @@ def cargar() -> Config:
         d = tomllib.loads(CONFIG.read_text())
     except (tomllib.TOMLDecodeError, OSError):
         d = {}
-    a, i, s = d.get("avisos", {}), d.get("imagenes", {}), d.get("salas", {})
+    a, i, s, v = d.get("avisos", {}), d.get("imagenes", {}), d.get("salas", {}), d.get("videos", {})
     return Config(
         avisos=a.get("activos", True), avisos_texto=a.get("con_texto", True),
         campana=a.get("campana", False), imagenes=i.get("activas", True),
         alto_imagen=int(i.get("alto", 12)), estilo_imagen=str(i.get("estilo", "auto")),
+        animar=bool(i.get("animar", True)), reproductor=str(v.get("reproductor", "auto")),
         por_nombre=list(s.get("por_nombre", [])),
         colores=dict(d.get("colores", {})),
     )

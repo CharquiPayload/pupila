@@ -52,7 +52,7 @@
 .mensaje .cita { height: auto; }
 .mensaje .sufijo { height: 1; }
 .mensaje .reacciones { height: 1; margin-top: 0; }
-.mensaje .imagen { margin: 0 0 0 0; }
+.mensaje .imagen { margin-top: 1; }
 .mensaje .aviso { text-style: italic; }
 .dia {
     width: 100%;

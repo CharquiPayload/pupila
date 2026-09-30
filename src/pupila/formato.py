@@ -92,14 +92,19 @@ ICONOS = {"m.image": "🖼", "m.sticker": "🖼", "m.video": "🎞", "m.audio": 
 
 
 def adjunto(e: Evento) -> Text:
+    from .medios import duracion, es_animado
+
     info = e.contenido.get("info") or {}
     nombre = e.contenido.get("filename") or e.contenido.get("body") or "archivo"
-    partes = [ICONOS.get(e.msgtype, "📎") + " ", (nombre, "bold")]
-    extra = " · ".join(x for x in (tamano(info.get("size")),
-                                   f"{info['duration'] // 1000} s" if info.get("duration") else "") if x)
-    if extra:
-        partes.append((f"  {extra}", "dim"))
-    partes.append(("  (clic para abrir)", "dim italic"))
+    if es_animado(e):
+        return Text.assemble(("GIF", "bold #b4a7f5"), ("  clic para abrirlo en grande", "dim italic"))
+    if e.msgtype == "m.video":
+        partes = [("▶ ", "bold #b4a7f5"), (duracion(e) or "video", "bold")]
+    else:
+        partes = [ICONOS.get(e.msgtype, "📎") + " ", (nombre, "bold")]
+    if info.get("size"):
+        partes.append((f"  {tamano(info['size'])}", "dim"))
+    partes.append(("  clic para " + ("verlo" if e.msgtype == "m.video" else "abrir"), "dim italic"))
     return Text.assemble(*partes)
 
 

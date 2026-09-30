@@ -15,13 +15,13 @@ from textual.widgets.option_list import Option
 from textual_image.widget import HalfcellImage, UnicodeImage
 from textual_image.widget import Image as ImagenTerminal
 
-from . import formato
+from . import formato, medios
 from .modelo import Evento, Sala
 
 if TYPE_CHECKING:
     from .app import Pupila
 
-IMAGENES = {"m.image", "m.sticker"}
+MEDIOS = {"m.image", "m.sticker", "m.video"}
 ESTILOS_IMAGEN = {"auto": ImagenTerminal, "bloques": HalfcellImage, "texto": UnicodeImage}
 
 
@@ -36,6 +36,11 @@ class Mensaje(Vertical):
             super().__init__()
             self.mensaje = mensaje
 
+    class Abrir(Message):
+        def __init__(self, mensaje: "Mensaje") -> None:
+            super().__init__()
+            self.mensaje = mensaje
+
     def __init__(self, ev: Evento, sala: Sala, grupo: bool) -> None:
         super().__init__(classes="mensaje -grupo" if grupo else "mensaje")
         self.ev, self.sala, self.grupo = ev, sala, grupo
@@ -44,9 +49,17 @@ class Mensaje(Vertical):
     def pupila(self) -> "Pupila":
         return self.app  # type: ignore[return-value]
 
-    def _con_imagen(self) -> bool:
-        return (self.ev.msgtype in IMAGENES and self.pupila.cfg.imagenes and not self.ev.borrado
+    def _con_medio(self) -> bool:
+        return (self.ev.msgtype in MEDIOS and self.pupila.cfg.imagenes and not self.ev.borrado
                 and bool(self.ev.contenido.get("url")))
+
+    def _animado(self) -> bool:
+        return self.pupila.cfg.animar and medios.es_animado(self.ev)
+
+    def _clave_fija(self) -> str:
+        """Dónde guarda la app la imagen quieta: la foto, o la miniatura del video."""
+        url = self.ev.contenido["url"]
+        return "video:" + url if self.ev.msgtype == "m.video" else url
 
     def compose(self) -> ComposeResult:
         p = self.pupila
@@ -56,12 +69,13 @@ class Mensaje(Vertical):
         c = formato.cita(self.ev, al, self.sala, colores)
         if c:
             yield Static(c, classes="cita")
-        if self._con_imagen():
-            img = p.imagenes.get(self.ev.contenido["url"])
+        if self._con_medio():
+            cuadros = p.animaciones.get(self.ev.contenido["url"]) if self._animado() else None
+            img = cuadros[0][0] if cuadros else p.imagenes.get(self._clave_fija())
             if img is not None:
                 yield self._imagen(img)
-            else:
-                yield Static(formato.adjunto(self.ev), classes="cuerpo cargando")
+            if img is None or medios.es_video(self.ev) or (self.ev.msgtype == "m.video" and not cuadros):
+                yield Static(formato.adjunto(self.ev), classes="cuerpo medio")
             pie = formato.pie_de_foto(self.ev)
             if pie:
                 yield Static(pie, classes="cuerpo")
@@ -77,27 +91,64 @@ class Mensaje(Vertical):
 
     def _imagen(self, img):
         clase = ESTILOS_IMAGEN.get(self.pupila.cfg.estilo_imagen, ImagenTerminal)
-        w = clase(img, classes="imagen")
+        w = clase(img, classes="imagen medio")
         w.styles.height = self.pupila.cfg.alto_imagen
         w.styles.width = "auto"
         return w
 
     def on_mount(self) -> None:
-        if self._con_imagen() and self.ev.contenido["url"] not in self.pupila.imagenes:
-            self.cargar_imagen()
+        self._cuadros: list = []
+        self._i = 0
+        if not self._con_medio():
+            return
+        url = self.ev.contenido["url"]
+        if self._animado() and url in self.pupila.animaciones:
+            self._animar(self.pupila.animaciones[url])
+        elif (self._animado() and url not in self.pupila.animaciones) or \
+                self._clave_fija() not in self.pupila.imagenes:
+            self.cargar_medio()
 
-    @work(exclusive=True, group="imagen")
-    async def cargar_imagen(self) -> None:
-        img = await self.pupila.imagen(self.ev.contenido["url"])
-        if img is not None and self.is_mounted:
+    @work(exclusive=True, group="medio")
+    async def cargar_medio(self) -> None:
+        p = self.pupila
+        cuadros = await p.animacion(self.ev) if self._animado() else None
+        if not cuadros:
+            if self.ev.msgtype == "m.video":
+                await p.miniatura_video(self.ev)
+            else:
+                await p.imagen(self.ev.contenido["url"])
+        if self.is_mounted:
             await self.recompose()
+            if cuadros:
+                self._animar(cuadros)
+
+    # --- animación: cada cuadro dura lo suyo; fuera de la pantalla no se dibuja ---
+
+    def _animar(self, cuadros: list) -> None:
+        if len(cuadros) < 2 or self._cuadros:
+            return
+        self._cuadros, self._i = cuadros, 0
+        self.set_timer(cuadros[0][1], self._siguiente)
+
+    def _siguiente(self) -> None:
+        if not self.is_mounted or not self._cuadros:
+            return
+        self._i = (self._i + 1) % len(self._cuadros)
+        if self.is_on_screen:
+            for w in self.query(".imagen"):
+                w._image = self._cuadros[self._i][0]  # mismo tamaño: sin recalcular el diseño
+                w.refresh()
+        self.set_timer(self._cuadros[self._i][1], self._siguiente)
 
     async def refrescar(self) -> None:
         await self.recompose()
 
     def on_click(self, event) -> None:
         event.stop()
-        self.post_message(self.Clic(self))
+        if event.widget is not None and event.widget.has_class("medio"):
+            self.post_message(self.Abrir(self))  # clic en la imagen o el video: se abre directo
+        else:
+            self.post_message(self.Clic(self))
 
 
 class Linea(VerticalScroll):

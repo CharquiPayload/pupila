@@ -40,7 +40,17 @@ con `estilo = "bloques"` en la sección `[imagenes]` de `config.toml`.
 | `Ctrl+Q` | salir |
 
 **Clic en un mensaje**: responder, reaccionar, copiar, editar, borrar o abrir el archivo.
-**Arrastrar un archivo** a la terminal lo envía.
+**Clic en una imagen, GIF o video**: se abre directo. **Arrastrar un archivo** a la terminal
+lo envía.
+
+## GIF y videos
+
+- Los **GIF se mueven dentro del chat**, también los de Discord y WhatsApp (que llegan como
+  videos cortos; para esos hace falta `ffmpeg`).
+- Los **videos** muestran su primer cuadro con la duración. Al hacer clic se abren con
+  [mpv](https://mpv.io) si está instalado, o con el programa por defecto del sistema.
+- Con `reproductor = "terminal"` en la sección `[videos]` de `config.toml`, mpv los reproduce
+  dentro de la misma terminal, en bloques de colores (`q` vuelve a Pupila).
 
 Comandos: `/me acción`, `/subir ruta`, `/ayuda`. Para enviar algo que empiece con `/`,
 escribe `//`.

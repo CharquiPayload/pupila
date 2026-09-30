@@ -5,8 +5,10 @@ import asyncio
 import io
 import mimetypes
 import shutil
+import subprocess
 import time
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 
 import httpx
@@ -20,7 +22,7 @@ from textual.containers import Horizontal, Vertical
 from textual.theme import Theme
 from textual.widgets import Footer, Static
 
-from . import config, formato
+from . import config, formato, medios
 from .matrix import ErrorMatrix, Matrix, reintentar
 from .modelo import Almacen, Cambios, Evento
 from .ui import Barra, Confirmar, Entrada, Entrar, Linea, Menu, Mensaje, Reaccion
@@ -89,6 +91,7 @@ class Pupila(App):
         self.enfocada = True
         self.conectado = False
         self.imagenes: dict[str, PILImage.Image | None] = {}
+        self.animaciones: OrderedDict[str, list] = OrderedDict()  # url -> [(cuadro, segundos)]
         self.respondiendo: Evento | None = None
         self.editando: Evento | None = None
         self._leido: dict[str, str] = {}
@@ -616,24 +619,91 @@ class Pupila(App):
         self.imagenes[mxc] = img
         return img
 
-    async def abrir_archivo(self, ev: Evento) -> None:
+    async def descargar(self, ev: Evento) -> Path | None:
+        """El archivo completo, guardado en la caché (se descarga una sola vez)."""
         mxc = ev.contenido.get("url", "")
         nombre = Path(ev.contenido.get("filename") or ev.contenido.get("body") or "archivo").name
         destino = config.CACHE_DIR / "archivos" / f"{mxc.rsplit('/', 1)[-1]}_{nombre}"
         if not destino.exists():
-            self.notify(f"Descargando {nombre}…", timeout=3)
             try:
                 datos = await self.mx.bajar(mxc)
             except (ErrorMatrix, httpx.HTTPError) as e:
-                self.notify(f"No se pudo descargar: {e}", severity="error")
-                return
+                self.log(f"descarga {mxc}: {e}")
+                return None
             destino.parent.mkdir(parents=True, exist_ok=True)
             destino.write_bytes(datos)
-        if shutil.which("xdg-open"):
-            await asyncio.create_subprocess_exec("xdg-open", str(destino), stdout=asyncio.subprocess.DEVNULL,
+        return destino
+
+    async def animacion(self, ev: Evento) -> list | None:
+        """Los cuadros de un GIF (o de un video-GIF de Discord/WhatsApp) para animarlo en el chat."""
+        url = ev.contenido.get("url", "")
+        if url in self.animaciones:
+            self.animaciones.move_to_end(url)
+            return self.animaciones[url]
+        if (medios.info(ev).get("size") or 0) > 20 * 1024 * 1024:
+            return None
+        ruta = await self.descargar(ev)
+        if not ruta:
+            return None
+        datos = ruta.read_bytes()
+        try:
+            if ev.msgtype == "m.video":
+                cuadros = await medios.cuadros_video(datos)
+            else:
+                cuadros = await asyncio.to_thread(medios.cuadros_gif, datos)
+        except Exception as e:  # GIF roto, video raro
+            self.log(f"animación {url}: {e}")
+            cuadros = []
+        if not cuadros:
+            return None
+        self.animaciones[url] = cuadros
+        while len(self.animaciones) > 16:
+            self.animaciones.popitem(last=False)
+        return cuadros
+
+    async def miniatura_video(self, ev: Evento) -> PILImage.Image | None:
+        clave = "video:" + ev.contenido.get("url", "")
+        if clave in self.imagenes:
+            return self.imagenes[clave]
+        img = None
+        miniatura = medios.info(ev).get("thumbnail_url")
+        if miniatura:
+            img = await self.imagen(miniatura)
+        elif (medios.info(ev).get("size") or 0) <= 25 * 1024 * 1024:
+            ruta = await self.descargar(ev)
+            if ruta:
+                img = await medios.primer_cuadro(ruta.read_bytes())
+        self.imagenes[clave] = img
+        return img
+
+    async def abrir_archivo(self, ev: Evento) -> None:
+        nombre = ev.contenido.get("filename") or ev.contenido.get("body") or "archivo"
+        self.notify(f"Abriendo {nombre}…", timeout=2)
+        ruta = await self.descargar(ev)
+        if not ruta:
+            self.notify("No se pudo descargar.", severity="error")
+            return
+        es_video = ev.msgtype == "m.video" or medios.es_animado(ev)
+        mpv = shutil.which("mpv")
+        if es_video and mpv:
+            bucle = ["--loop-file=inf"] if medios.es_animado(ev) else []
+            if self.cfg.reproductor == "terminal":
+                with self.suspend():  # mpv dibuja en la misma terminal; q vuelve a Pupila
+                    subprocess.run([mpv, "--vo=tct", "--really-quiet", *bucle, str(ruta)])
+                return
+            await asyncio.create_subprocess_exec(
+                mpv, "--force-window=immediate", "--really-quiet", *bucle, str(ruta),
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
+        elif shutil.which("xdg-open"):
+            await asyncio.create_subprocess_exec("xdg-open", str(ruta), stdout=asyncio.subprocess.DEVNULL,
                                                  stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
         else:
-            self.notify(f"Guardado en {destino}")
+            self.notify(f"Guardado en {ruta}")
+
+    @on(Mensaje.Abrir)
+    @work(group="abrir-archivo")
+    async def _abrir_medio(self, event: Mensaje.Abrir) -> None:
+        await self.abrir_archivo(event.mensaje.ev)
 
     async def subir(self, ruta: Path | None = None, datos: bytes | None = None, tipo: str | None = None,
                     nombre: str | None = None) -> None:
