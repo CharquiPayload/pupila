@@ -16,6 +16,7 @@ from PIL import Image as PILImage
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
+from textual.actions import SkipAction
 from textual.binding import Binding
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 from textual.containers import Horizontal, Vertical
@@ -25,8 +26,8 @@ from textual.widgets import Footer, Static
 from . import config, media, render
 from .matrix import Matrix, MatrixError, retry
 from .model import Changes, Event, Store
-from .widgets import (Composer, Confirm, Login, LogoutRequested, Menu, MessageView, ReactionPicker, Settings,
-                      Sidebar, Timeline)
+from .widgets import (Composer, Confirm, ContextMenu, Login, LogoutRequested, MessageView, ReactionPicker,
+                      Settings, Sidebar, Timeline)
 
 BUILTIN_STYLE = Path(__file__).with_name("pupila.tcss")
 
@@ -79,6 +80,7 @@ class Pupila(App):
         Binding("ctrl+b", "sidebar", "Sidebar", priority=True),
         Binding("ctrl+s", "settings", "Settings", priority=True),
         Binding("escape", "cancel", "Cancel", show=False),
+        Binding("ctrl+c", "copy_selection", "Copy", show=False, priority=True),
         Binding("ctrl+q", "quit", "Quit", priority=True),
     ]
 
@@ -318,6 +320,22 @@ class Pupila(App):
             return
         i = order.index(self.current) if self.current in order else -1
         self.open_room(order[(i + step) % len(order)])
+
+    def action_copy_selection(self) -> None:
+        """Ctrl+C copies text selected with the mouse in the chat; otherwise the composer copies its own."""
+        text = self.screen.get_selected_text()
+        if not text:
+            raise SkipAction()
+        self.copy_to_clipboard(text)
+        self.screen.clear_selection()
+        self.notify("Copied.", timeout=2)
+
+    def copy_to_clipboard(self, text: str) -> None:
+        super().copy_to_clipboard(text)  # the terminal's way (OSC 52)
+        for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"]):
+            if shutil.which(cmd[0]):
+                self.run_worker(self._run(*cmd, stdin=text.encode()), group="clipboard")
+                break
 
     def action_sidebar(self) -> None:
         self.query_one(Sidebar).toggle_class("-hidden")
@@ -570,39 +588,40 @@ class Pupila(App):
 
     # ------------------------------------------------------------------ clicking a message
 
-    @on(MessageView.Clicked)
+    @on(MessageView.ContextRequested)
     @work(exclusive=True, group="menu")
-    async def _message_menu(self, event: MessageView.Clicked) -> None:
+    async def _message_menu(self, event: MessageView.ContextRequested) -> None:
         ev = event.view.ev
         if ev.event_id.startswith("~"):
             return
         options = []
+        if not ev.redacted:
+            options.append(("reply", "Reply"))
         if ev.msgtype in render.ICONS and ev.content.get("url"):
             options.append(("open", "Open in a player" if ev.msgtype == "m.video" else "Open"))
             options.append(("save", "Save to Downloads"))
-        if not ev.redacted:
-            options += [("reply", "Reply"), ("react", "React")]
-            if ev.msgtype not in render.ICONS:
-                options.append(("copy", "Copy text"))
+        elif not ev.redacted:
+            options.append(("copy", "Copy text"))
         if ev.sender == self.store.me and not ev.redacted:
             if ev.msgtype in ("m.text", "m.emote"):
                 options.append(("edit", "Edit"))
             options.append(("delete", "Delete"))
-        if not options:
+        reactions = config.top_reactions() if not ev.redacted else []
+        choice = await self.push_screen_wait(ContextMenu(event.x, event.y, reactions, options))
+        if not choice:
             return
-        r = self.store.rooms[self.current]
-        title = f"{self.store.user_name(ev.sender, r)} · {render.clock(ev.ts)}"
-        choice = await self.push_screen_wait(Menu(title, options))
-        if choice == "open":
+        if choice.startswith("react:"):
+            await self.react(ev, choice[6:])
+        elif choice == "react-more":
+            key = await self.push_screen_wait(ReactionPicker())
+            if key:
+                await self.react(ev, key)
+        elif choice == "open":
             await self.open_file(ev, force_window=True)
         elif choice == "save":
             await self.save_file(ev)
         elif choice == "reply":
             self.reply(ev)
-        elif choice == "react":
-            key = await self.push_screen_wait(ReactionPicker())
-            if key:
-                await self.react(ev, key)
         elif choice == "copy":
             await self.copy(ev.text)
         elif choice == "edit":
@@ -622,16 +641,12 @@ class Pupila(App):
                 await self.mx.redact(self.current, mine)  # picking the same reaction removes it
             else:
                 await self.mx.react(self.current, ev.event_id, key)
+                config.count_reaction(key)
         except (MatrixError, httpx.HTTPError) as e:
             self.notify(f"Couldn't react: {e}", severity="error")
 
     async def copy(self, text: str) -> None:
-        if shutil.which("wl-copy"):
-            await self._run("wl-copy", stdin=text.encode())
-        elif shutil.which("xclip"):
-            await self._run("xclip", "-selection", "clipboard", stdin=text.encode())
-        else:
-            self.copy_to_clipboard(text)
+        self.copy_to_clipboard(text)
         self.notify("Copied.", timeout=2)
 
     # ------------------------------------------------------------------ files

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from rich.text import Text
 from textual import work
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
 from textual.message import Message
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Input, Label, OptionList, Select, Static, Switch, TextArea, Tree
@@ -57,21 +57,33 @@ def _auto_image_class():
 IMAGE_STYLES = {"auto": _auto_image_class(), "blocks": HalfcellImage, "text": UnicodeImage}
 
 
+def cells_wide(img, lines: int) -> int:
+    """How many columns a picture `lines` tall takes, so its bubble fits it exactly."""
+    from textual_image._terminal import get_cell_size
+
+    cell = get_cell_size()
+    if not img.height:
+        return 1
+    return max(1, round(lines * cell.height * img.width / img.height / cell.width))
+
+
 # --------------------------------------------------------------------------- messages
 
 
 class MessageView(Vertical):
     """One chat message: header (if it starts a group), quote, body, picture and reactions."""
 
-    class Clicked(Message):
-        def __init__(self, view: "MessageView") -> None:
-            super().__init__()
-            self.view = view
-
     class Open(Message):
         def __init__(self, view: "MessageView") -> None:
             super().__init__()
             self.view = view
+
+    class ContextRequested(Message):
+        """Right click: the quick menu opens where the cursor is."""
+
+        def __init__(self, view: "MessageView", x: int, y: int) -> None:
+            super().__init__()
+            self.view, self.x, self.y = view, x, y
 
     def __init__(self, ev: Event, room: Room, group: bool) -> None:
         super().__init__(classes="message -group" if group else "message")
@@ -119,7 +131,7 @@ class MessageView(Vertical):
             cls = IMAGE_STYLES.get(p.cfg.image_style, IMAGE_STYLES["auto"])
             w = cls(img, classes="avatar")
             w.styles.height = 2
-            w.styles.width = "auto"
+            w.styles.width = cells_wide(img, 2)
             return w
         name = p.store.user_name(self.ev.sender, self.room).lstrip("@")
         w = Static(name[:1].upper() or "?", classes="initial")
@@ -141,9 +153,27 @@ class MessageView(Vertical):
 
     def _content(self) -> ComposeResult:
         p = self.pupila
-        store, colors = p.store, p.cfg.colors
+        if not p.cfg.bubbles:
+            if self.group:
+                yield Static(render.header(self.ev, p.store, self.room, p.cfg.colors), classes="header")
+            yield from self._inside()
+            yield from self._reactions()
+            return
+        color = render.color_for(self.ev.sender, p.cfg.colors)
+        bubble = Vertical(classes="bubble")
+        bubble.styles.border = ("round", color)
         if self.group:
-            yield Static(render.header(self.ev, store, self.room, colors), classes="header")
+            bubble.border_title = f"{p.store.user_name(self.ev.sender, self.room)} · {render.clock(self.ev.ts)}"
+            bubble.styles.border_title_color = color
+            bubble.styles.border_title_style = "bold"
+        with bubble:
+            yield from self._inside()
+        yield from self._reactions()
+
+    def _inside(self) -> ComposeResult:
+        """What goes in the bubble: quote, text or picture, and the (edited)/sending note."""
+        p = self.pupila
+        store, colors = p.store, p.cfg.colors
         q = render.quote(self.ev, store, self.room, colors)
         if q:
             yield Static(q, classes="quote")
@@ -163,15 +193,18 @@ class MessageView(Vertical):
         s = render.suffix(self.ev)
         if s:
             yield Static(s, classes="suffix")
-        r = render.reactions(self.ev, store.me)
+
+    def _reactions(self) -> ComposeResult:
+        r = render.reactions(self.ev, self.pupila.store.me)
         if r:
             yield Static(r, classes="reactions")
 
     def _picture(self, img):
         cls = IMAGE_STYLES.get(self.pupila.cfg.image_style, IMAGE_STYLES["auto"])
         w = cls(img, classes="image media")
-        w.styles.height = self.pupila.cfg.image_height
-        w.styles.width = "auto"
+        height = self.pupila.cfg.image_height
+        w.styles.height = height
+        w.styles.width = cells_wide(img, height)
         return w
 
     def _needs_media(self) -> bool:
@@ -294,14 +327,18 @@ class MessageView(Vertical):
 
     def on_click(self, event) -> None:
         event.stop()
+        if event.button == 3:
+            self.post_message(self.ContextRequested(self, event.screen_x, event.screen_y))
+            return
+        if event.button != 1:
+            return
         on_media = event.widget is not None and event.widget.has_class("media")
         if on_media and media.is_video(self.ev) and self.pupila.cfg.video_player == "chat" \
                 and media.can_play_inline():
             self.toggle_video()
         elif on_media:
             self.post_message(self.Open(self))  # a click on the picture or video opens it directly
-        else:
-            self.post_message(self.Clicked(self))
+        # a left click on text does nothing, so you can drag to select it
 
 
 class Timeline(VerticalScroll):
@@ -598,25 +635,75 @@ class Confirm(ModalScreen[bool]):
         self.dismiss(event.button.id == "yes")
 
 
-QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏", "🌸", "✅", "🔥", "👀"]
+EMOJIS = ("👍 👎 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 😂 🤣 😊 😍 🥰 😘 😎 🤩 🥳 😮 😯 😲 😢 😭 😡 🤬 😱 😳 🥺 😅 "
+          "😆 🙂 🙃 😉 😏 😴 🤔 🤨 😐 😬 🙄 🤯 🤡 💀 👻 👀 🙏 👏 🙌 👋 🤝 💪 🫡 🤷 🤦 ✅ ❌ ⭐ 🔥 💯 "
+          "🎉 🎊 🌸 🌺 🌈 ☀️ 🌙 ⚡ 💩 🍕 🍺 ☕ 🎮 🎵 💤 ⚠️ ❓ ❗ 🆗 🐱").split()
 
 
 class ReactionPicker(ModalScreen[str | None]):
+    """"More reactions": a grid of emojis, or type any other."""
+
     BINDINGS = [("escape", "dismiss(None)", "Close")]
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with Vertical(classes="dialog picker"):
             yield Static("React", classes="title")
-            with Horizontal(classes="emojis"):
-                for i, e in enumerate(QUICK_REACTIONS):
-                    yield Button(e, id=f"e{i}", classes="emoji")
-            yield Input(placeholder="or another emoji / text, then Enter")
+            with Grid(classes="emoji-grid"):
+                for e in EMOJIS:
+                    yield Static(e, classes="emoji-cell")
+            yield Input(placeholder="or type any emoji / text, then Enter")
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(str(event.button.label))
+    def on_click(self, event) -> None:
+        if event.widget is not None and event.widget.has_class("emoji-cell"):
+            self.dismiss(str(event.widget.content))
+        elif event.widget is self:
+            self.dismiss(None)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value.strip() or None)
+
+
+class ContextMenu(ModalScreen[str | None]):
+    """The quick menu of a message, right next to the cursor (right click), like Discord's.
+
+    Returns "react:<emoji>", "react-more" or the id of an option.
+    """
+
+    BINDINGS = [("escape", "dismiss(None)", "Close")]
+    WIDTH = 30
+
+    def __init__(self, x: int, y: int, reactions: list[str], options: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self.at = (x, y)
+        self.reactions, self.options = reactions, options
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="context"):
+            with Horizontal(classes="quick"):
+                for e in self.reactions:
+                    yield Static(e, classes="quick-reaction")
+                yield Static("＋", classes="quick-reaction more")
+            yield OptionList(*[Option(text, id=oid) for oid, text in self.options])
+
+    def on_mount(self) -> None:
+        box = self.query_one("#context")
+        height = len(self.options) + 3
+        x = max(0, min(self.at[0] + 1, self.size.width - self.WIDTH - 1))
+        y = max(0, min(self.at[1], self.size.height - height - 1))
+        box.styles.offset = (x, y)
+        self.query_one(OptionList).focus()
+
+    def on_click(self, event) -> None:
+        w = event.widget
+        if w is not None and w.has_class("more"):
+            self.dismiss("react-more")
+        elif w is not None and w.has_class("quick-reaction"):
+            self.dismiss("react:" + str(w.content))
+        elif w is self:
+            self.dismiss(None)  # a click outside the menu closes it
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id)
 
 
 class Settings(ModalScreen["config.Config | None"]):
@@ -646,6 +733,8 @@ class Settings(ModalScreen["config.Config | None"]):
                 yield self._switch("notify", "Desktop notifications", c.notify)
                 yield self._switch("notify_text", "Show the message in them", c.notify_text)
                 yield self._switch("bell", "Also ring the terminal bell", c.bell)
+                yield Static("Chat", classes="section")
+                yield self._switch("bubbles", "Messages in bubbles", c.bubbles)
                 yield Static("Pictures", classes="section")
                 yield self._switch("images", "Show pictures in the chat", c.images)
                 yield self._switch("avatars", "Show profile pictures", c.avatars)
@@ -692,7 +781,7 @@ class Settings(ModalScreen["config.Config | None"]):
         except ValueError:
             height = self.cfg.image_height
         return config.Config(
-            notify=on("notify"), notify_text=on("notify_text"), bell=on("bell"),
+            notify=on("notify"), notify_text=on("notify_text"), bell=on("bell"), bubbles=on("bubbles"),
             images=on("images"), avatars=on("avatars"), animate=on("animate"),
             image_style=str(self.query_one("#image_style", Select).value), image_height=height,
             video_player=str(self.query_one("#video_player", Select).value),

@@ -46,8 +46,9 @@ with `style = "blocks"` in the `[images]` section of `config.toml`.
 | `Ctrl+S` | settings |
 | `Ctrl+Q` | quit |
 
-**Click a message** to reply, react, copy, edit, delete, open its file or save it to your
-Downloads folder.
+**Right-click a message** for its quick menu, right next to the cursor: your most used
+reactions (＋ for more), reply, copy, edit, delete, open or save to your Downloads folder.
+**Drag over text** to select it and `Ctrl+C` to copy it.
 **Click an image or GIF** to open it large; **click a video** to play it right there.
 **Drag a file** onto the terminal to send it.
 
@@ -71,8 +72,8 @@ instantly while you use Pupila and are gone after the next reboot. To keep one, 
 
 ## Customising
 
-- **`Ctrl+S`** opens the settings: notifications, pictures, profile pictures, GIFs, videos,
-  which spaces sort their rooms by name, and logging out.
+- **`Ctrl+S`** opens the settings: notifications, message bubbles, pictures, profile
+  pictures, GIFs, videos, which spaces sort their rooms by name, and logging out.
 - `~/.config/pupila/config.toml`: the same settings as a file (plus people's colours).
   Created on first run, with comments.
 - `~/.config/pupila/pupila.tcss`: the look (colours, widths, margins), in Textual's CSS.

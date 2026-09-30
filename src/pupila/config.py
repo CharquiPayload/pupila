@@ -38,6 +38,9 @@ enabled = {notify}          # desktop notifications (notify-send)
 show_text = {notify_text}        # include the message in the notification
 bell = {bell}             # also ring the terminal bell
 
+[chat]
+bubbles = {bubbles}          # each message inside its own bubble, edged in the sender's colour
+
 [images]
 enabled = {images}          # show images inside the terminal
 height = {image_height}              # height in lines
@@ -68,6 +71,7 @@ class Config:
     notify: bool = True
     notify_text: bool = True
     bell: bool = False
+    bubbles: bool = True
     images: bool = True
     image_height: int = 12
     image_style: str = "auto"
@@ -83,7 +87,7 @@ class Config:
 
         return TEMPLATE.format(
             notify=b(self.notify), notify_text=b(self.notify_text), bell=b(self.bell),
-            images=b(self.images), image_height=self.image_height, image_style=self.image_style,
+            bubbles=b(self.bubbles), images=b(self.images), image_height=self.image_height, image_style=self.image_style,
             animate=b(self.animate), avatars=b(self.avatars), video_player=self.video_player,
             sort_by_name=json.dumps(self.sort_by_name, ensure_ascii=False),
             colors="".join(f'"{k}" = "{v}"\n' for k, v in self.colors.items()),
@@ -121,12 +125,37 @@ def load() -> Config:
     n, i, v, r = d.get("notifications", {}), d.get("images", {}), d.get("videos", {}), d.get("rooms", {})
     return Config(
         notify=n.get("enabled", True), notify_text=n.get("show_text", True), bell=n.get("bell", False),
+        bubbles=bool(d.get("chat", {}).get("bubbles", True)),
         images=i.get("enabled", True), image_height=int(i.get("height", 12)),
         image_style=str(i.get("style", "auto")), animate=bool(i.get("animate", True)),
         avatars=bool(i.get("avatars", True)),
         video_player=str(v.get("player", "chat")), sort_by_name=list(r.get("sort_by_name", [])),
         colors=dict(d.get("colors", {})),
     )
+
+
+REACTIONS_FILE = STATE_DIR / "reactions.json"
+DEFAULT_REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🙏", "👀"]
+
+
+def top_reactions(n: int = 6) -> list[str]:
+    """The reactions you use most, topped up with the usual ones."""
+    try:
+        counts = json.loads(REACTIONS_FILE.read_text())
+    except (OSError, ValueError):
+        counts = {}
+    used = sorted(counts, key=lambda k: -counts[k])
+    return (used + [r for r in DEFAULT_REACTIONS if r not in used])[:n]
+
+
+def count_reaction(key: str) -> None:
+    try:
+        counts = json.loads(REACTIONS_FILE.read_text())
+    except (OSError, ValueError):
+        counts = {}
+    counts[key] = counts.get(key, 0) + 1
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    REACTIONS_FILE.write_text(json.dumps(counts, ensure_ascii=False))
 
 
 def save(cfg: Config) -> None:

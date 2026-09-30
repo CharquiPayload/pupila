@@ -53,6 +53,7 @@
 .message .suffix { height: 1; }
 .message .reactions { height: 1; }
 .message .image { margin-top: 1; }
+.message .bubble > .image { margin-top: 0; }
 .message .notice { text-style: italic; }
 .message .with-avatar { height: auto; }
 .message .avatar-slot { width: 6; height: auto; }
@@ -65,6 +66,17 @@
     color: $background;
 }
 .message .content { width: 1fr; height: auto; }
+.message .bubble {
+    width: auto;
+    max-width: 90%;
+    min-width: 24;
+    height: auto;
+    padding: 0 1;
+    background: $surface;
+}
+.message .bubble > .body, .message .bubble > .quote, .message .bubble > .suffix { width: auto; }
+.message.-group .bubble { margin-top: 0; }
+.message .reactions { width: auto; margin-left: 1; }
 .day {
     width: 100%;
     text-align: center;
@@ -80,6 +92,27 @@
 
 /* --- dialogs --- */
 Menu, Confirm, ReactionPicker, Login, Settings { align: center middle; }
+
+/* --- right-click menu, next to the cursor --- */
+ContextMenu { background: transparent; align: left top; }
+#context {
+    width: 30;
+    height: auto;
+    background: $surface;
+    border: round $primary;
+    padding: 0;
+}
+#context .quick { height: 1; width: 100%; padding: 0 1; }
+#context .quick-reaction { width: 4; height: 1; content-align: center middle; }
+#context .quick-reaction:hover { background: $primary 40%; }
+#context OptionList { height: auto; border: none; background: $surface; padding: 0; }
+
+/* --- "more reactions" --- */
+.picker { width: 60; }
+.picker Input { width: 100%; }
+.emoji-grid { grid-size: 10; grid-gutter: 0 1; height: auto; margin-bottom: 1; }
+.emoji-cell { width: 4; height: 1; content-align: center middle; }
+.emoji-cell:hover { background: $primary 40%; }
 .dialog {
     width: 60;
     height: auto;
@@ -105,11 +138,13 @@ Menu, Confirm, ReactionPicker, Login, Settings { align: center middle; }
 .settings { width: 76; height: 90%; max-height: 44; }
 .settings-body { height: 1fr; padding-right: 1; }
 .settings .section { text-style: bold; color: $primary; margin-top: 1; }
-.settings .setting { height: auto; }
-.settings Switch { height: 1; width: auto; border: none; padding: 0 1 0 0; background: $surface; }
+.settings .setting { height: auto; margin-bottom: 1; }
+.settings Switch { height: 1; width: auto; border: none; padding: 0 2 0 0; background: $surface; }
 .settings Switch:focus { border: none; background-tint: $primary 20%; }
 .settings .setting Label { padding: 0 1; }
 .settings .setting .label { width: 22; padding: 1 1 0 0; }
+.settings .setting Select, .settings .setting Input { margin-bottom: 0; }
+.settings Checkbox { margin-bottom: 1; }
 .settings .setting Select { width: 1fr; }
 .settings .setting Input { width: 10; }
 .settings .hint { color: $text-muted; margin-top: 1; }
