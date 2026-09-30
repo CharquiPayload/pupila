@@ -1,7 +1,7 @@
 [project]
 name = "pupila"
-version = "0.2.2"
-description = "Cliente de Matrix para la terminal, sin modos de Vim"
+version = "0.3.0"
+description = "A Matrix client for the terminal, without Vim modes"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

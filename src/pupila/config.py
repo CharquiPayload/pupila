@@ -1,9 +1,9 @@
-"""Dónde vive cada cosa de Pupila y su configuración.
+"""Where Pupila keeps its things, and its settings.
 
-- ~/.config/pupila/config.toml   preferencias (se crea con valores por defecto)
-- ~/.config/pupila/pupila.tcss   estilo propio, encima del de fábrica (opcional)
-- ~/.local/state/pupila/sesion.json   token de la sesión (solo lo lee tu usuario)
-- ~/.cache/pupila/               imágenes y archivos descargados
+- ~/.config/pupila/config.toml        preferences (created with defaults)
+- ~/.config/pupila/pupila.tcss        your own style, on top of the built-in one (optional)
+- ~/.local/state/pupila/session.json  the session token (readable only by you)
+- ~/.cache/pupila/                    downloaded images and files
 """
 from __future__ import annotations
 
@@ -14,98 +14,136 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-def _xdg(var: str, defecto: str) -> Path:
-    return Path(os.environ.get(var) or Path.home() / defecto) / "pupila"
+def _xdg(var: str, default: str) -> Path:
+    return Path(os.environ.get(var) or Path.home() / default) / "pupila"
 
 
 CONFIG_DIR = _xdg("XDG_CONFIG_HOME", ".config")
-ESTADO_DIR = _xdg("XDG_STATE_HOME", ".local/state")
+STATE_DIR = _xdg("XDG_STATE_HOME", ".local/state")
 CACHE_DIR = _xdg("XDG_CACHE_HOME", ".cache")
-CONFIG = CONFIG_DIR / "config.toml"
-ESTILO = CONFIG_DIR / "pupila.tcss"
-SESION = ESTADO_DIR / "sesion.json"
+CONFIG_FILE = CONFIG_DIR / "config.toml"
+STYLE_FILE = CONFIG_DIR / "pupila.tcss"
+SESSION_FILE = STATE_DIR / "session.json"
+LAST_ROOM_FILE = STATE_DIR / "last_room"
 
-CONFIG_INICIAL = """\
-# Pupila: preferencias. Se leen al abrir; los cambios de estilo van en pupila.tcss
-# (en esta misma carpeta), que se recarga en vivo mientras Pupila está abierta.
+TEMPLATE = """\
+# Pupila settings. Read at startup; style changes go in pupila.tcss (same folder),
+# which is reloaded live while Pupila is running.
 
-[avisos]
-activos = true          # notificaciones de escritorio (notify-send)
-con_texto = true        # mostrar el mensaje en la notificación
-campana = false         # además, la campana de la terminal
+[notifications]
+enabled = {notify}          # desktop notifications (notify-send)
+show_text = {notify_text}        # include the message in the notification
+bell = {bell}             # also ring the terminal bell
 
-[imagenes]
-activas = true          # mostrar imágenes dentro de la terminal
-alto = 12               # alto en líneas
-estilo = "auto"         # "auto": nítidas si la terminal puede (foot, kitty), bloques si no
-                        # "bloques": siempre en bloques de colores, estilo pixel
-                        # "texto": con caracteres, lo más retro
-animar = true           # los GIF se mueven dentro del chat (los de Discord/WhatsApp piden ffmpeg)
+[images]
+enabled = {images}          # show images inside the terminal
+height = {image_height}              # height in lines
+style = "{image_style}"           # "auto": sharp if the terminal can (kitty, foot), blocks otherwise
+                         # "blocks": always coloured blocks, pixel-art style
+                         # "text": drawn with characters, the most retro
+animate = {animate}          # GIFs move inside the chat (Discord/WhatsApp ones need ffmpeg)
 
 [videos]
-# Al hacer clic en un video o GIF:
-#   "auto": mpv si está instalado; si no, el programa por defecto del sistema
-#   "terminal": dentro de la misma terminal con mpv (q para volver): nítido en kitty y
-#               foot, en bloques de colores en Alacritty o si estilo = "bloques"
-reproductor = "auto"
+# What clicking a video does:
+#   "chat":     plays it inside the message, with sound (needs ffmpeg; sound via ffplay or mpv)
+#   "terminal": full screen in this same terminal with mpv (q to come back)
+#   "window":   in its own window (mpv, or the system's default app)
+player = "{video_player}"
 
-[salas]
-# Espacios cuyas salas van por nombre (el resto, por actividad reciente).
-por_nombre = []
+[rooms]
+# Spaces whose rooms are sorted by name (the rest, by recent activity).
+sort_by_name = {sort_by_name}
 
-# Colores de personas concretas: "@usuario:servidor" = "#rrggbb"
-[colores]
-"""
+# Colours for specific people: "@user:server" = "#rrggbb"
+[colors]
+{colors}"""
 
 
 @dataclass
 class Config:
-    avisos: bool = True
-    avisos_texto: bool = True
-    campana: bool = False
-    imagenes: bool = True
-    alto_imagen: int = 12
-    estilo_imagen: str = "auto"
-    animar: bool = True
-    reproductor: str = "auto"
-    por_nombre: list[str] = field(default_factory=list)
-    colores: dict[str, str] = field(default_factory=dict)
+    notify: bool = True
+    notify_text: bool = True
+    bell: bool = False
+    images: bool = True
+    image_height: int = 12
+    image_style: str = "auto"
+    animate: bool = True
+    video_player: str = "chat"
+    sort_by_name: list[str] = field(default_factory=list)
+    colors: dict[str, str] = field(default_factory=dict)
+
+    def to_toml(self) -> str:
+        def b(v: bool) -> str:
+            return "true" if v else "false"
+
+        return TEMPLATE.format(
+            notify=b(self.notify), notify_text=b(self.notify_text), bell=b(self.bell),
+            images=b(self.images), image_height=self.image_height, image_style=self.image_style,
+            animate=b(self.animate), video_player=self.video_player,
+            sort_by_name=json.dumps(self.sort_by_name, ensure_ascii=False),
+            colors="".join(f'"{k}" = "{v}"\n' for k, v in self.colors.items()),
+        )
 
 
-def cargar() -> Config:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    if not CONFIG.exists():
-        CONFIG.write_text(CONFIG_INICIAL)
-    try:
-        d = tomllib.loads(CONFIG.read_text())
-    except (tomllib.TOMLDecodeError, OSError):
-        d = {}
+def _from_spanish(d: dict) -> Config:
+    """Settings written by Pupila 0.2 and earlier, when it spoke Spanish."""
     a, i, s, v = d.get("avisos", {}), d.get("imagenes", {}), d.get("salas", {}), d.get("videos", {})
+    style = {"bloques": "blocks", "texto": "text"}.get(i.get("estilo", "auto"), "auto")
+    player = "terminal" if v.get("reproductor") == "terminal" else "chat"
     return Config(
-        avisos=a.get("activos", True), avisos_texto=a.get("con_texto", True),
-        campana=a.get("campana", False), imagenes=i.get("activas", True),
-        alto_imagen=int(i.get("alto", 12)), estilo_imagen=str(i.get("estilo", "auto")),
-        animar=bool(i.get("animar", True)), reproductor=str(v.get("reproductor", "auto")),
-        por_nombre=list(s.get("por_nombre", [])),
-        colores=dict(d.get("colores", {})),
+        notify=a.get("activos", True), notify_text=a.get("con_texto", True), bell=a.get("campana", False),
+        images=i.get("activas", True), image_height=int(i.get("alto", 12)), image_style=style,
+        animate=i.get("animar", True), video_player=player,
+        sort_by_name=list(s.get("por_nombre", [])), colors=dict(d.get("colores", {})),
     )
 
 
-def leer_sesion() -> dict | None:
+def load() -> Config:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    _migrate_state()
+    if not CONFIG_FILE.exists():
+        CONFIG_FILE.write_text(Config().to_toml())
     try:
-        return json.loads(SESION.read_text())
+        d = tomllib.loads(CONFIG_FILE.read_text())
+    except (tomllib.TOMLDecodeError, OSError):
+        d = {}
+    if "avisos" in d or "imagenes" in d or "salas" in d:
+        cfg = _from_spanish(d)
+        CONFIG_FILE.rename(CONFIG_FILE.with_name("config.toml.old"))
+        CONFIG_FILE.write_text(cfg.to_toml())
+        return cfg
+    n, i, v, r = d.get("notifications", {}), d.get("images", {}), d.get("videos", {}), d.get("rooms", {})
+    return Config(
+        notify=n.get("enabled", True), notify_text=n.get("show_text", True), bell=n.get("bell", False),
+        images=i.get("enabled", True), image_height=int(i.get("height", 12)),
+        image_style=str(i.get("style", "auto")), animate=bool(i.get("animate", True)),
+        video_player=str(v.get("player", "chat")), sort_by_name=list(r.get("sort_by_name", [])),
+        colors=dict(d.get("colors", {})),
+    )
+
+
+def _migrate_state() -> None:
+    """Files named in Spanish by Pupila 0.2 and earlier."""
+    for old, new in ((STATE_DIR / "sesion.json", SESSION_FILE), (STATE_DIR / "ultima_sala", LAST_ROOM_FILE)):
+        if old.exists() and not new.exists():
+            old.rename(new)
+
+
+def read_session() -> dict | None:
+    try:
+        return json.loads(SESSION_FILE.read_text())
     except (OSError, ValueError):
         return None
 
 
-def guardar_sesion(d: dict) -> None:
-    ESTADO_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = SESION.with_suffix(".tmp")
+def save_session(d: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = SESSION_FILE.with_suffix(".tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         json.dump(d, f)
-    os.replace(tmp, SESION)
+    os.replace(tmp, SESSION_FILE)
 
 
-def borrar_sesion() -> None:
-    SESION.unlink(missing_ok=True)
+def delete_session() -> None:
+    SESSION_FILE.unlink(missing_ok=True)

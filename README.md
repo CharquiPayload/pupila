@@ -1,71 +1,78 @@
 # Pupila
 
-Un cliente de [Matrix](https://matrix.org) para la terminal, **sin modos de Vim**: escribes
-directo, `Enter` envía y el mouse funciona. Hecho con [Textual](https://textual.textualize.io).
+A [Matrix](https://matrix.org) client for the terminal, **without Vim modes**: you just type,
+`Enter` sends and the mouse works. Built with [Textual](https://textual.textualize.io).
 
-Pensado para un servidor propio sin cifrado (no soporta salas cifradas).
+Made for a self-hosted server without encryption (encrypted rooms aren't supported).
 
-## Instalar
+## Install
 
-Con [uv](https://docs.astral.sh/uv/) (en Arch/CachyOS: `sudo pacman -S uv`):
+With [uv](https://docs.astral.sh/uv/) (on Arch/CachyOS: `sudo pacman -S uv`):
 
 ```
 uv tool install git+https://github.com/CharquiPayload/pupila
 pupila
 ```
 
-Para actualizar: `uv tool upgrade pupila`.
+To update: `uv tool upgrade pupila`.
 
-La primera vez pide la dirección del servidor, tu usuario y tu contraseña. La sesión queda en
-`~/.local/state/pupila/sesion.json`, que solo tu usuario puede leer. `pupila --salir` la cierra.
+On first run it asks for your server address, user and password. The session is kept in
+`~/.local/state/pupila/session.json`, readable only by your user. `pupila --logout` ends it.
 
-Para pegar imágenes con `Ctrl+V` hace falta `wl-clipboard` (Wayland) o `xclip` (X11). Las
-imágenes se ven nítidas en terminales con gráficos (foot, kitty, WezTerm, Ghostty) y
-en bloques de colores en las demás (Alacritty). Si te gusta el estilo pixel, se puede forzar
-con `estilo = "bloques"` en la sección `[imagenes]` de `config.toml`.
+Optional, but recommended:
 
-## Teclas
+- `wl-clipboard` (Wayland) or `xclip` (X11), to paste images with `Ctrl+V`.
+- `ffmpeg`, to animate GIFs from Discord and WhatsApp and to play videos inside the chat
+  (`ffplay`, which comes with it, or `mpv` plays the sound).
+- `mpv`, to open videos in their own window or full screen in the terminal.
 
-| Tecla | Qué hace |
+Images are sharp in terminals with graphics support (kitty, foot, WezTerm, Ghostty) and drawn
+with coloured blocks in the others (Alacritty). If you like the pixel look, you can force it
+with `style = "blocks"` in the `[images]` section of `config.toml`.
+
+## Keys
+
+| Key | What it does |
 |---|---|
-| `Enter` | envía |
-| `Alt+Enter` | salto de línea (`Shift+Enter` si tu terminal lo distingue) |
-| `Ctrl+K` | buscar una sala por nombre |
-| `Alt+↑` / `Alt+↓` | sala anterior / siguiente |
-| `↑` (con la barra vacía) | editar tu último mensaje |
-| `Ctrl+R` | responder al último mensaje de otra persona |
-| `Ctrl+V` | pegar (si hay una imagen en el portapapeles, la envía) |
-| `Esc` | cancelar respuesta o edición |
-| `Ctrl+B` | mostrar u ocultar la barra de salas |
-| `Ctrl+Q` | salir |
+| `Enter` | send |
+| `Alt+Enter` | new line (`Shift+Enter` if your terminal tells them apart) |
+| `Ctrl+K` | find a room by name |
+| `Alt+↑` / `Alt+↓` | previous / next room |
+| `↑` (with the composer empty) | edit your last message |
+| `Ctrl+R` | reply to the last message from someone else |
+| `Ctrl+V` | paste (if the clipboard holds an image, it's sent) |
+| `Esc` | cancel a reply or an edit |
+| `Ctrl+B` | show or hide the room sidebar |
+| `Ctrl+Q` | quit |
 
-**Clic en un mensaje**: responder, reaccionar, copiar, editar, borrar o abrir el archivo.
-**Clic en una imagen, GIF o video**: se abre directo. **Arrastrar un archivo** a la terminal
-lo envía.
+**Click a message** to reply, react, copy, edit, delete or open its file.
+**Click an image or GIF** to open it large; **click a video** to play it right there.
+**Drag a file** onto the terminal to send it.
 
-## GIF y videos
+Commands: `/me action`, `/upload path`, `/help`. To send something that starts with `/`,
+type `//`.
 
-- Los **GIF se mueven dentro del chat**, también los de Discord y WhatsApp (que llegan como
-  videos cortos; para esos hace falta `ffmpeg`).
-- Los **videos** muestran su primer cuadro con la duración. Al hacer clic se abren con
-  [mpv](https://mpv.io) si está instalado, o con el programa por defecto del sistema.
-- Con `reproductor = "terminal"` en la sección `[videos]` de `config.toml`, mpv los reproduce
-  dentro de la misma terminal (`q` vuelve a Pupila): nítidos en kitty (su protocolo de
-  gráficos) y en foot (sixel), y en bloques de colores en Alacritty.
+## GIFs and videos
 
-Comandos: `/me acción`, `/subir ruta`, `/ayuda`. Para enviar algo que empiece con `/`,
-escribe `//`.
+- **GIFs move inside the chat**, including the ones from Discord and WhatsApp (which arrive as
+  short videos; those need `ffmpeg`).
+- **Videos** show their first frame and length. Clicking one plays it **inside the message,
+  with sound**, like Discord does; click again to pause. "Open in a player" in the message
+  menu opens it in its own window.
+- In the `[videos]` section of `config.toml`, `player` picks what a click does:
+  `"chat"` (inside the message), `"terminal"` (full screen in the same terminal with mpv:
+  sharp in kitty and foot, coloured blocks in Alacritty; `q` comes back) or `"window"`.
 
-## Personalizar
+## Customising
 
-- `~/.config/pupila/config.toml`: notificaciones, imágenes, orden de las salas y colores de
-  personas. Se crea solo la primera vez, con comentarios.
-- `~/.config/pupila/pupila.tcss`: el aspecto (colores, anchos, márgenes), en el CSS de Textual.
-  Se aplica encima del de fábrica ([`src/pupila/pupila.tcss`](src/pupila/pupila.tcss)) y se
-  recarga en vivo mientras Pupila está abierta. Por ejemplo:
+- `~/.config/pupila/config.toml`: notifications, images, videos, room order and people's
+  colours. Created on first run, with comments.
+- `~/.config/pupila/pupila.tcss`: the look (colours, widths, margins), in Textual's CSS.
+  It's applied on top of the built-in one ([`src/pupila/pupila.tcss`](src/pupila/pupila.tcss))
+  and reloaded live while Pupila is running. For example:
 
 ```css
-#barra { width: 40; }
-#entrada { border: heavy $accent; }
-.mensaje.-grupo { margin-top: 0; }
+#sidebar { width: 40; }
+#composer { border: heavy $accent; }
+.message.-group { margin-top: 0; }
 ```

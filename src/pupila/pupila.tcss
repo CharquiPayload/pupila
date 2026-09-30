@@ -1,39 +1,39 @@
-/* Estilo de fábrica de Pupila.
-   Para cambiar algo, no edites este archivo: crea ~/.config/pupila/pupila.tcss
-   con solo lo que quieras cambiar. Se aplica encima de este y se recarga en vivo.
-   Colores del tema: $primary (lavanda), $secondary, $accent, $surface, $panel... */
+/* Pupila's built-in style.
+   To change something, don't edit this file: create ~/.config/pupila/pupila.tcss
+   with only what you want to change. It's applied on top of this one and reloaded live.
+   Theme colours: $primary (lavender), $secondary, $accent, $surface, $panel... */
 
-#cuerpo { height: 1fr; }
+#body { height: 1fr; }
 
-/* --- barra de salas --- */
-#barra {
+/* --- room sidebar --- */
+#sidebar {
     width: 32;
     background: $surface;
     border-right: vkey $panel;
     padding: 0 0 0 1;
     scrollbar-size-vertical: 1;
 }
-#barra.-oculta { display: none; }
-#barra > .tree--cursor { background: $primary 30%; text-style: none; }
-#barra:focus > .tree--cursor { background: $primary 45%; }
-#barra > .tree--guides { color: $panel; }
+#sidebar.-hidden { display: none; }
+#sidebar > .tree--cursor { background: $primary 30%; text-style: none; }
+#sidebar:focus > .tree--cursor { background: $primary 45%; }
+#sidebar > .tree--guides { color: $panel; }
 
-/* --- centro --- */
-#centro { width: 1fr; }
-#cabecera {
+/* --- centre --- */
+#center { width: 1fr; }
+#header {
     height: 1;
     padding: 0 1;
     background: $panel;
 }
-#linea {
+#timeline {
     height: 1fr;
     padding: 0 2 0 1;
     scrollbar-size-vertical: 1;
 }
-#escribiendo { height: 1; padding: 0 2; }
-#accion { height: auto; padding: 0 2; display: none; }
-#accion.-visible { display: block; }
-#entrada {
+#typing { height: 1; padding: 0 2; }
+#action { height: auto; padding: 0 2; display: none; }
+#action.-visible { display: block; }
+#composer {
     height: auto;
     min-height: 3;
     max-height: 10;
@@ -41,36 +41,35 @@
     border: round $primary 60%;
     background: $surface;
 }
-#entrada:focus { border: round $primary; }
+#composer:focus { border: round $primary; }
 
-/* --- mensajes --- */
-.mensaje { height: auto; padding: 0 1; }
-.mensaje.-grupo { margin-top: 1; }
-.mensaje:hover { background: $boost; }
-.mensaje .cabecera { height: 1; }
-.mensaje .cuerpo { height: auto; }
-.mensaje .cita { height: auto; }
-.mensaje .sufijo { height: 1; }
-.mensaje .reacciones { height: 1; margin-top: 0; }
-.mensaje .imagen { margin-top: 1; }
-.mensaje .aviso { text-style: italic; }
-.dia {
+/* --- messages --- */
+.message { height: auto; padding: 0 1; }
+.message.-group { margin-top: 1; }
+.message:hover { background: $boost; }
+.message .header { height: 1; }
+.message .body { height: auto; }
+.message .quote { height: auto; }
+.message .suffix { height: 1; }
+.message .reactions { height: 1; }
+.message .image { margin-top: 1; }
+.message .notice { text-style: italic; }
+.day {
     width: 100%;
-    content-align: center middle;
     text-align: center;
     color: $text-muted;
     margin-top: 1;
 }
-.mas, .vacio {
+.more, .empty {
     width: 100%;
     text-align: center;
     color: $text-muted;
     padding: 1 0;
 }
 
-/* --- diálogos --- */
-Menu, Confirmar, Reaccion, Entrar { align: center middle; }
-.dialogo {
+/* --- dialogs --- */
+Menu, Confirm, ReactionPicker, Login { align: center middle; }
+.dialog {
     width: 60;
     height: auto;
     max-height: 80%;
@@ -78,15 +77,15 @@ Menu, Confirmar, Reaccion, Entrar { align: center middle; }
     background: $surface;
     border: round $primary;
 }
-.dialogo .titulo { text-style: bold; margin-bottom: 1; }
-.dialogo OptionList { height: auto; max-height: 14; border: none; background: $surface; }
-.dialogo .botones { height: auto; align-horizontal: right; }
-.dialogo .botones Button { margin-left: 1; }
-.dialogo .emojis { height: auto; }
-.dialogo .emoji { min-width: 5; width: 5; margin: 0; }
-.entrar { width: 56; }
-.entrar .logo { text-style: bold; color: $primary; text-align: center; width: 100%; }
-.entrar .titulo { text-align: center; width: 100%; text-style: none; color: $text-muted; }
-.entrar Input { margin-bottom: 1; }
-.entrar Button { width: 100%; }
+.dialog .title { text-style: bold; margin-bottom: 1; }
+.dialog OptionList { height: auto; max-height: 14; border: none; background: $surface; }
+.dialog .buttons { height: auto; align-horizontal: right; }
+.dialog .buttons Button { margin-left: 1; }
+.dialog .emojis { height: auto; }
+.dialog .emoji { min-width: 5; width: 5; margin: 0; }
+.login { width: 56; }
+.login .logo { text-style: bold; color: $primary; text-align: center; width: 100%; }
+.login .title { text-align: center; width: 100%; text-style: none; color: $text-muted; }
+.login Input { margin-bottom: 1; }
+.login Button { width: 100%; }
 #error { color: $error; margin-top: 1; }

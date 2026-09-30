@@ -1,4 +1,4 @@
-"""Punto de entrada: `pupila` (o `python -m pupila`)."""
+"""Entry point: `pupila` (or `python -m pupila`)."""
 from __future__ import annotations
 
 import argparse
@@ -8,34 +8,35 @@ import sys
 def main() -> int:
     from . import __version__, config
 
-    ap = argparse.ArgumentParser(prog="pupila", description="Cliente de Matrix para la terminal.")
+    ap = argparse.ArgumentParser(prog="pupila", description="A Matrix client for the terminal.")
     ap.add_argument("--version", action="version", version=f"pupila {__version__}")
-    ap.add_argument("--salir", action="store_true", help="cierra la sesión guardada y termina")
+    ap.add_argument("--logout", action="store_true", help="log out of the saved session and exit")
     args = ap.parse_args()
-    if args.salir:
+    if args.logout:
         import asyncio
 
         from .matrix import Matrix
 
-        s = config.leer_sesion()
+        config.load()  # moves files from older versions into place
+        s = config.read_session()
         if s:
-            async def fuera() -> None:
+            async def out() -> None:
                 mx = Matrix(s["homeserver"], s["token"], s["user_id"])
                 try:
-                    await mx.salir()
+                    await mx.logout()
                 finally:
-                    await mx.cerrar()
+                    await mx.close()
             try:
-                asyncio.run(fuera())
+                asyncio.run(out())
             except Exception as e:
-                print(f"El servidor no respondió ({e}); igual borro la sesión local.")
-            config.borrar_sesion()
-        print("Sesión cerrada.")
+                print(f"The server didn't answer ({e}); deleting the local session anyway.")
+            config.delete_session()
+        print("Logged out.")
         return 0
 
-    from .app import Pupila  # importa textual-image, que pregunta a la terminal antes de arrancar
+    from .app import Pupila  # imports textual-image, which asks the terminal before starting
 
-    Pupila(config.cargar()).run()
+    Pupila(config.load()).run()
     return 0
 
 

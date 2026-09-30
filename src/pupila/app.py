@@ -1,4 +1,4 @@
-"""La aplicación: conecta la pantalla con el servidor."""
+"""The application: connects the screen to the server."""
 from __future__ import annotations
 
 import asyncio
@@ -22,767 +22,764 @@ from textual.containers import Horizontal, Vertical
 from textual.theme import Theme
 from textual.widgets import Footer, Static
 
-from . import config, formato, medios
-from .matrix import ErrorMatrix, Matrix, reintentar
-from .modelo import Almacen, Cambios, Evento
-from .ui import Barra, Confirmar, Entrada, Entrar, Linea, Menu, Mensaje, Reaccion
+from . import config, media, render
+from .matrix import Matrix, MatrixError, retry
+from .model import Changes, Event, Store
+from .widgets import Composer, Confirm, Login, Menu, MessageView, ReactionPicker, Sidebar, Timeline
 
-FABRICA = Path(__file__).with_name("pupila.tcss")
-ULTIMA = config.ESTADO_DIR / "ultima_sala"
+BUILTIN_STYLE = Path(__file__).with_name("pupila.tcss")
 
-TEMA = Theme(
+THEME = Theme(
     name="pupila", primary="#9b87f5", secondary="#7c6fd6", accent="#c9b8ff",
     foreground="#e6e1f5", background="#16141d", surface="#1d1a26", panel="#2a2536",
     success="#a6da95", warning="#f0c674", error="#f38ba8", dark=True,
 )
 
 
-class Salas(Provider):
-    """Ctrl+K: buscar una sala por nombre."""
+class RoomSearch(Provider):
+    """Ctrl+K: find a room by name."""
 
     async def search(self, query: str) -> Hits:
         app: Pupila = self.app  # type: ignore[assignment]
-        if not app.almacen:
+        if not app.store:
             return
-        buscar = self.matcher(query)
-        for s in app.almacen.salas.values():
-            if s.es_espacio:
+        matcher = self.matcher(query)
+        for r in app.store.rooms.values():
+            if r.is_space:
                 continue
-            nombre = app.almacen.nombre_sala(s)
-            puntos = buscar.match(nombre)
-            if puntos > 0:
-                yield Hit(puntos, buscar.highlight(nombre), lambda sid=s.room_id: app.abrir(sid),
-                          text=nombre, help=app.espacio_de(s.room_id))
+            name = app.store.room_name(r)
+            score = matcher.match(name)
+            if score > 0:
+                yield Hit(score, matcher.highlight(name), lambda rid=r.room_id: app.open_room(rid),
+                          text=name, help=app.space_of(r.room_id))
 
     async def discover(self) -> Hits:
         app: Pupila = self.app  # type: ignore[assignment]
-        if not app.almacen:
+        if not app.store:
             return
-        salas = [s for s in app.almacen.salas.values() if not s.es_espacio and not s.invitacion]
-        salas.sort(key=lambda s: (-(s.menciones * 1000 + s.sin_leer), -s.ultimo_ts))
-        for s in salas[:20]:
-            nombre = app.almacen.nombre_sala(s)
-            etiqueta = f"{nombre}  ({s.sin_leer})" if s.sin_leer else nombre
-            yield DiscoveryHit(etiqueta, lambda sid=s.room_id: app.abrir(sid), text=nombre,
-                               help=app.espacio_de(s.room_id))
+        rooms = [r for r in app.store.rooms.values() if not r.is_space and not r.invited]
+        rooms.sort(key=lambda r: (-(r.highlights * 1000 + r.unread), -r.last_ts))
+        for r in rooms[:20]:
+            name = app.store.room_name(r)
+            label = f"{name}  ({r.unread})" if r.unread else name
+            yield DiscoveryHit(label, lambda rid=r.room_id: app.open_room(rid), text=name,
+                               help=app.space_of(r.room_id))
 
 
 class Pupila(App):
     TITLE = "Pupila"
     COMMAND_PALETTE_BINDING = "ctrl+k"
-    COMMANDS = {Salas}
+    COMMANDS = {RoomSearch}
     BINDINGS = [
-        Binding("ctrl+k", "command_palette", "Buscar sala", show=False, priority=True),
-        Binding("alt+up", "mover(-1)", "Sala anterior", show=False, priority=True),
-        Binding("alt+down", "mover(1)", "Sala siguiente", show=False, priority=True),
-        Binding("ctrl+r", "responder_ultimo", "Responder", priority=True),
-        Binding("ctrl+b", "barra", "Barra", priority=True),
-        Binding("escape", "cancelar", "Cancelar", show=False),
-        Binding("ctrl+q", "quit", "Salir", priority=True),
+        Binding("ctrl+k", "command_palette", "Find room", show=False, priority=True),
+        Binding("alt+up", "move(-1)", "Previous room", show=False, priority=True),
+        Binding("alt+down", "move(1)", "Next room", show=False, priority=True),
+        Binding("ctrl+r", "reply_last", "Reply", priority=True),
+        Binding("ctrl+b", "sidebar", "Sidebar", priority=True),
+        Binding("escape", "cancel", "Cancel", show=False),
+        Binding("ctrl+q", "quit", "Quit", priority=True),
     ]
 
     def __init__(self, cfg: config.Config) -> None:
-        estilos = [FABRICA] + ([config.ESTILO] if config.ESTILO.exists() else [])
-        super().__init__(css_path=estilos, watch_css=True)
+        styles = [BUILTIN_STYLE] + ([config.STYLE_FILE] if config.STYLE_FILE.exists() else [])
+        super().__init__(css_path=styles, watch_css=True)
         self.cfg = cfg
         self.mx: Matrix | None = None
-        self.almacen: Almacen | None = None
-        self.actual: str | None = None
-        self.enfocada = True
-        self.conectado = False
-        self.imagenes: dict[str, PILImage.Image | None] = {}
-        self.animaciones: OrderedDict[str, list] = OrderedDict()  # url -> [(cuadro, segundos)]
-        self.respondiendo: Evento | None = None
-        self.editando: Evento | None = None
-        self._leido: dict[str, str] = {}
-        self._escribiendo_hasta = 0.0
-        self._barra_pendiente = False
+        self.store: Store | None = None
+        self.current: str | None = None
+        self.focused_app = True
+        self.connected = False
+        self.images: dict[str, PILImage.Image | None] = {}
+        self.animations: OrderedDict[str, list] = OrderedDict()  # url -> [(frame, seconds)]
+        self.replying: Event | None = None
+        self.editing: Event | None = None
+        self._read: dict[str, str] = {}
+        self._typing_until = 0.0
+        self._sidebar_pending = False
 
-    # ------------------------------------------------------------------ pantalla
+    # ------------------------------------------------------------------ screen
 
     def compose(self) -> ComposeResult:
-        with Horizontal(id="cuerpo"):
-            yield Barra(id="barra")
-            with Vertical(id="centro"):
-                yield Static(id="cabecera")
-                yield Linea(id="linea")
-                yield Static(id="escribiendo")
-                yield Static(id="accion")
-                yield Entrada(id="entrada")
+        with Horizontal(id="body"):
+            yield Sidebar(id="sidebar")
+            with Vertical(id="center"):
+                yield Static(id="header")
+                yield Timeline(id="timeline")
+                yield Static(id="typing")
+                yield Static(id="action")
+                yield Composer(id="composer")
         yield Footer()
 
     async def on_mount(self) -> None:
-        self.register_theme(TEMA)
+        self.register_theme(THEME)
         self.theme = "pupila"
-        await self.query_one(Linea).mostrar(None)
-        self.pintar_cabecera()
-        sesion = config.leer_sesion()
-        if sesion:
-            self.iniciar(sesion)
+        await self.query_one(Timeline).show(None)
+        self.paint_header()
+        session = config.read_session()
+        if session:
+            self.start(session)
         else:
-            self.push_screen(Entrar(), self._tras_entrar)
+            self.push_screen(Login(), self._after_login)
 
-    def _tras_entrar(self, sesion: dict | None) -> None:
-        if not sesion:
+    def _after_login(self, session: dict | None) -> None:
+        if not session:
             self.exit()
             return
-        config.guardar_sesion(sesion)
-        self.iniciar(sesion)
+        config.save_session(session)
+        self.start(session)
 
-    def iniciar(self, sesion: dict) -> None:
-        self.mx = Matrix(sesion["homeserver"], sesion["token"], sesion["user_id"], sesion.get("device_id"))
-        self.almacen = Almacen(sesion["user_id"])
-        self.query_one(Entrada).focus()
-        self.run_worker(self.bucle_sync(), group="sync", exclusive=True)
+    def start(self, session: dict) -> None:
+        self.mx = Matrix(session["homeserver"], session["token"], session["user_id"], session.get("device_id"))
+        self.store = Store(session["user_id"])
+        self.query_one(Composer).focus()
+        self.run_worker(self.sync_loop(), group="sync", exclusive=True)
 
-    def pintar_cabecera(self) -> None:
-        cab = self.query_one("#cabecera", Static)
-        estado = Text(" ● conectado" if self.conectado else " ○ conectando…",
-                      style="#a6da95" if self.conectado else "#f0c674")
-        if not (self.almacen and self.actual in self.almacen.salas):
-            cab.update(Text.assemble(("Pupila", "bold #b4a7f5"), "  ", estado))
+    def paint_header(self) -> None:
+        header = self.query_one("#header", Static)
+        status = Text(" ● connected" if self.connected else " ○ connecting…",
+                      style="#a6da95" if self.connected else "#f0c674")
+        if not (self.store and self.current in self.store.rooms):
+            header.update(Text.assemble(("Pupila", "bold #b4a7f5"), "  ", status))
             return
-        s = self.almacen.salas[self.actual]
-        t = Text.assemble((self.almacen.nombre_sala(s), "bold"))
-        espacio = self.espacio_de(s.room_id)
-        if espacio:
-            t = Text.assemble((espacio + " › ", "dim"), t)
-        if s.tema:
-            tema = s.tema.split("\n")[0]
-            t.append("  " + (tema[:90] + "…" if len(tema) > 90 else tema), style="dim")
-        t.append_text(estado)
-        cab.update(t)
+        r = self.store.rooms[self.current]
+        t = Text.assemble((self.store.room_name(r), "bold"))
+        space = self.space_of(r.room_id)
+        if space:
+            t = Text.assemble((space + " › ", "dim"), t)
+        if r.topic:
+            topic = r.topic.split("\n")[0]
+            t.append("  " + (topic[:90] + "…" if len(topic) > 90 else topic), style="dim")
+        t.append_text(status)
+        header.update(t)
 
-    def pintar_escribiendo(self) -> None:
-        w = self.query_one("#escribiendo", Static)
-        s = self.almacen.salas.get(self.actual) if self.almacen and self.actual else None
-        if not s or not s.escribiendo:
+    def paint_typing(self) -> None:
+        w = self.query_one("#typing", Static)
+        r = self.store.rooms.get(self.current) if self.store and self.current else None
+        if not r or not r.typing:
             w.update("")
             return
-        nombres = [self.almacen.nombre_usuario(u, s) for u in sorted(s.escribiendo)]
-        texto = nombres[0] if len(nombres) == 1 else ", ".join(nombres[:-1]) + " y " + nombres[-1]
-        w.update(Text(f"{texto} {'está' if len(nombres) == 1 else 'están'} escribiendo…",
-                      style="italic #b4a7f5"))
+        names = [self.store.user_name(u, r) for u in sorted(r.typing)]
+        who = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+        w.update(Text(f"{who} {'is' if len(names) == 1 else 'are'} typing…", style="italic #b4a7f5"))
 
-    def pintar_accion(self) -> None:
-        w = self.query_one("#accion", Static)
-        if self.editando:
-            w.update(Text.assemble(("✎ Editando tu mensaje", "bold #f0c674"), ("   Esc cancela", "dim")))
-        elif self.respondiendo:
-            s = self.almacen.salas[self.actual]
-            quien = self.almacen.nombre_usuario(self.respondiendo.sender, s)
-            resumen = self.respondiendo.texto.split("\n")[0][:70]
-            w.update(Text.assemble(("↪ Respondiendo a ", "#b4a7f5"), (quien, "bold"),
-                                   (": " + resumen, "dim"), ("   Esc cancela", "dim")))
+    def paint_action(self) -> None:
+        w = self.query_one("#action", Static)
+        if self.editing:
+            w.update(Text.assemble(("✎ Editing your message", "bold #f0c674"), ("   Esc cancels", "dim")))
+        elif self.replying:
+            r = self.store.rooms[self.current]
+            who = self.store.user_name(self.replying.sender, r)
+            summary = self.replying.text.split("\n")[0][:70]
+            w.update(Text.assemble(("↪ Replying to ", "#b4a7f5"), (who, "bold"),
+                                   (": " + summary, "dim"), ("   Esc cancels", "dim")))
         else:
             w.update("")
-        w.set_class(bool(self.editando or self.respondiendo), "-visible")
+        w.set_class(bool(self.editing or self.replying), "-visible")
 
-    def ancestros(self, sid: str | None) -> set[str]:
-        """Los espacios que contienen la sala, hasta arriba (para desplegarlos en la barra)."""
-        fuera: set[str] = set()
-        pendientes = [sid] if sid else []
-        while pendientes and self.almacen:
-            actual = pendientes.pop()
-            for s in self.almacen.salas.values():
-                if s.es_espacio and actual in s.hijos and s.room_id not in fuera:
-                    fuera.add(s.room_id)
-                    pendientes.append(s.room_id)
-        return fuera
+    def space_ancestors(self, rid: str | None) -> set[str]:
+        """The spaces that contain the room, all the way up (to expand them in the sidebar)."""
+        out: set[str] = set()
+        pending = [rid] if rid else []
+        while pending and self.store:
+            current = pending.pop()
+            for r in self.store.rooms.values():
+                if r.is_space and current in r.children and r.room_id not in out:
+                    out.add(r.room_id)
+                    pending.append(r.room_id)
+        return out
 
-    def espacio_de(self, sid: str) -> str:
-        if not self.almacen:
+    def space_of(self, rid: str) -> str:
+        if not self.store:
             return ""
-        for s in self.almacen.salas.values():
-            if s.es_espacio and sid in s.hijos:
-                return self.almacen.nombre_sala(s)
+        for r in self.store.rooms.values():
+            if r.is_space and rid in r.children:
+                return self.store.room_name(r)
         return ""
 
-    def pedir_barra(self) -> None:
-        """Rehace la barra como mucho cada medio segundo."""
-        if self._barra_pendiente:
+    def request_sidebar(self) -> None:
+        """Rebuilds the sidebar at most every half second."""
+        if self._sidebar_pending:
             return
-        self._barra_pendiente = True
+        self._sidebar_pending = True
 
-        def hacer() -> None:
-            self._barra_pendiente = False
-            self.query_one(Barra).reconstruir(self)
+        def do() -> None:
+            self._sidebar_pending = False
+            self.query_one(Sidebar).rebuild(self)
 
-        self.set_timer(0.5, hacer)
+        self.set_timer(0.5, do)
 
-    # ------------------------------------------------------------------ sincronización
+    # ------------------------------------------------------------------ sync
 
-    async def bucle_sync(self) -> None:
-        desde: str | None = None
-        espera = 1.0
+    async def sync_loop(self) -> None:
+        since: str | None = None
+        wait = 1.0
         while True:
             try:
-                d = await self.mx.sync(desde)
-            except ErrorMatrix as e:
+                d = await self.mx.sync(since)
+            except MatrixError as e:
                 if e.errcode in ("M_UNKNOWN_TOKEN", "M_MISSING_TOKEN"):
-                    config.borrar_sesion()
-                    self.notify("La sesión ya no es válida: vuelve a entrar.", severity="error")
-                    self.push_screen(Entrar(), self._tras_entrar)
+                    config.delete_session()
+                    self.notify("The session is no longer valid: please log in again.", severity="error")
+                    self.push_screen(Login(), self._after_login)
                     return
-                self._desconectado(f"el servidor respondió {e.status}")
-                await asyncio.sleep(espera)
-                espera = min(espera * 2, 30)
+                self._disconnected(f"the server answered {e.status}")
+                await asyncio.sleep(wait)
+                wait = min(wait * 2, 30)
                 continue
             except (httpx.TransportError, httpx.TimeoutException) as e:
-                self._desconectado(type(e).__name__)
-                await asyncio.sleep(espera)
-                espera = min(espera * 2, 30)
+                self._disconnected(type(e).__name__)
+                await asyncio.sleep(wait)
+                wait = min(wait * 2, 30)
                 continue
-            inicial = desde is None
-            cambios = self.almacen.aplicar_sync(d, inicial)
-            desde = d.get("next_batch", desde)
-            espera = 1.0
-            if not self.conectado:
-                self.conectado = True
-                self.pintar_cabecera()
-            await self.aplicar(cambios, inicial)
+            initial = since is None
+            changes = self.store.apply_sync(d, initial)
+            since = d.get("next_batch", since)
+            wait = 1.0
+            if not self.connected:
+                self.connected = True
+                self.paint_header()
+            await self.apply(changes, initial)
 
-    def _desconectado(self, motivo: str) -> None:
-        if self.conectado:
-            self.conectado = False
-            self.pintar_cabecera()
-            self.log(f"sync: {motivo}")
+    def _disconnected(self, reason: str) -> None:
+        if self.connected:
+            self.connected = False
+            self.paint_header()
+            self.log(f"sync: {reason}")
 
-    async def aplicar(self, c: Cambios, inicial: bool) -> None:
-        if inicial:
-            self.query_one(Barra).reconstruir(self)
-            ultima = ULTIMA.read_text().strip() if ULTIMA.exists() else ""
-            if ultima not in self.almacen.salas:
-                primera = self.query_one(Barra).orden_visual
-                ultima = primera[0] if primera else ""
-            if ultima:
-                self.abrir(ultima)
+    async def apply(self, c: Changes, initial: bool) -> None:
+        if initial:
+            self.query_one(Sidebar).rebuild(self)
+            last = config.LAST_ROOM_FILE.read_text().strip() if config.LAST_ROOM_FILE.exists() else ""
+            if last not in self.store.rooms:
+                order = self.query_one(Sidebar).visual_order
+                last = order[0] if order else ""
+            if last:
+                self.open_room(last)
             return
-        if c.estructura or c.salas:
-            self.pedir_barra()
-        if self.actual in c.salas:
-            linea = self.query_one(Linea)
-            if self.actual in c.limitadas:
-                await linea.mostrar(self.almacen.salas[self.actual])
+        if c.structure or c.rooms:
+            self.request_sidebar()
+        if self.current in c.rooms:
+            timeline = self.query_one(Timeline)
+            if self.current in c.limited:
+                await timeline.show(self.store.rooms[self.current])
             else:
-                await linea.sincronizar()
-                for eid in c.actualizados:
-                    await linea.actualizar(eid)
-            self.pintar_escribiendo()
-            self.marcar_leido()
-        for sid, ev in c.nuevos[:3]:
-            self.avisar(sid, ev)
+                await timeline.sync()
+                for eid in c.updated:
+                    await timeline.update_event(eid)
+            self.paint_typing()
+            self.mark_read()
+        for rid, ev in c.new[:3]:
+            self.notify_message(rid, ev)
 
-    # ------------------------------------------------------------------ salas
+    # ------------------------------------------------------------------ rooms
 
-    def abrir(self, sid: str) -> None:
-        self.run_worker(self._abrir(sid), group="abrir", exclusive=True)
+    def open_room(self, rid: str) -> None:
+        self.run_worker(self._open_room(rid), group="open-room", exclusive=True)
 
-    async def _abrir(self, sid: str) -> None:
-        s = self.almacen.salas.get(sid) if self.almacen else None
-        if not s:
+    async def _open_room(self, rid: str) -> None:
+        r = self.store.rooms.get(rid) if self.store else None
+        if not r:
             return
-        if s.invitacion:
-            quien = self.almacen.nombre_usuario(s.invitado_por) if s.invitado_por else "alguien"
-            if await self.push_screen_wait(Confirmar(
-                    f"{quien} te invitó a «{self.almacen.nombre_sala(s)}». ¿Entrar?", "Entrar", "Ahora no")):
+        if r.invited:
+            who = self.store.user_name(r.invited_by) if r.invited_by else "Someone"
+            if await self.push_screen_wait(Confirm(
+                    f"{who} invited you to “{self.store.room_name(r)}”. Join?", "Join", "Not now")):
                 try:
-                    await self.mx.unirse(sid)
-                except ErrorMatrix as e:
-                    self.notify(f"No se pudo entrar: {e.error}", severity="error")
+                    await self.mx.join(rid)
+                except MatrixError as e:
+                    self.notify(f"Couldn't join: {e.error}", severity="error")
             return
-        if s.es_espacio:
+        if r.is_space:
             return
-        self.actual = sid
-        self.respondiendo = self.editando = None
-        self.pintar_accion()
-        config.ESTADO_DIR.mkdir(parents=True, exist_ok=True)
-        ULTIMA.write_text(sid)
-        await self.query_one(Linea).mostrar(s)
-        self.pintar_cabecera()
-        self.pintar_escribiendo()
-        self.marcar_leido()
-        self.pedir_barra()
-        self.query_one(Entrada).focus()
+        self.current = rid
+        self.replying = self.editing = None
+        self.paint_action()
+        config.STATE_DIR.mkdir(parents=True, exist_ok=True)
+        config.LAST_ROOM_FILE.write_text(rid)
+        await self.query_one(Timeline).show(r)
+        self.paint_header()
+        self.paint_typing()
+        self.mark_read()
+        self.request_sidebar()
+        self.query_one(Composer).focus()
 
-    @on(Barra.NodeSelected)
-    def _nodo(self, event: Barra.NodeSelected) -> None:
-        sid = event.node.data
-        if sid and not sid.startswith("#") and not event.node.allow_expand:
-            self.abrir(sid)
+    @on(Sidebar.NodeSelected)
+    def _node_selected(self, event: Sidebar.NodeSelected) -> None:
+        rid = event.node.data
+        if rid and not rid.startswith("#") and not event.node.allow_expand:
+            self.open_room(rid)
 
-    def action_mover(self, paso: int) -> None:
-        orden = self.query_one(Barra).orden_visual
-        if not orden:
+    def action_move(self, step: int) -> None:
+        order = self.query_one(Sidebar).visual_order
+        if not order:
             return
-        i = orden.index(self.actual) if self.actual in orden else -1
-        self.abrir(orden[(i + paso) % len(orden)])
+        i = order.index(self.current) if self.current in order else -1
+        self.open_room(order[(i + step) % len(order)])
 
-    def action_barra(self) -> None:
-        self.query_one(Barra).toggle_class("-oculta")
+    def action_sidebar(self) -> None:
+        self.query_one(Sidebar).toggle_class("-hidden")
 
-    @on(Linea.PedirHistorial)
-    async def _historial(self) -> None:
-        linea = self.query_one(Linea)
-        s = linea.sala
-        if not s or not s.prev_batch or linea.cargando:
+    @on(Timeline.LoadHistory)
+    async def _load_history(self) -> None:
+        timeline = self.query_one(Timeline)
+        r = timeline.room
+        if not r or not r.prev_batch or timeline.fetching:
             return
-        linea.cargando = True
+        timeline.fetching = True
         try:
-            d = await self.mx.mensajes(s.room_id, s.prev_batch)
-            self.almacen.aplicar_historial(s.room_id, d)
-            if linea.sala is s:
-                alto_antes = linea.virtual_size.height
-                await linea.mostrar(s, al_final=False)
-                self.call_after_refresh(
-                    lambda: linea.scroll_to(y=max(0, linea.virtual_size.height - alto_antes), animate=False))
-        except (ErrorMatrix, httpx.HTTPError) as e:
-            self.notify(f"No pude traer mensajes anteriores: {e}", severity="warning")
+            d = await self.mx.messages(r.room_id, r.prev_batch)
+            self.store.apply_history(r.room_id, d)
+            if timeline.room is r:
+                height_before = timeline.virtual_size.height
+                await timeline.show(r, at_end=False)
+                self.call_after_refresh(lambda: timeline.scroll_to(
+                    y=max(0, timeline.virtual_size.height - height_before), animate=False))
+        except (MatrixError, httpx.HTTPError) as e:
+            self.notify(f"Couldn't fetch older messages: {e}", severity="warning")
         finally:
-            linea.cargando = False
+            timeline.fetching = False
 
-    def marcar_leido(self) -> None:
-        if not (self.actual and self.enfocada and self.almacen):
+    def mark_read(self) -> None:
+        if not (self.current and self.focused_app and self.store):
             return
-        s = self.almacen.salas.get(self.actual)
-        ultimo = next((e.event_id for e in reversed(s.eventos) if not e.event_id.startswith("~")), None) if s else None
-        if not ultimo or self._leido.get(self.actual) == ultimo:
+        r = self.store.rooms.get(self.current)
+        last = next((e.event_id for e in reversed(r.events) if not e.event_id.startswith("~")), None) if r else None
+        if not last or self._read.get(self.current) == last:
             return
-        self._leido[self.actual] = ultimo
-        s.sin_leer = s.menciones = 0
-        self.pedir_barra()
-        self.run_worker(self._leido_servidor(self.actual, ultimo), group="leido")
+        self._read[self.current] = last
+        r.unread = r.highlights = 0
+        self.request_sidebar()
+        self.run_worker(self._send_read(self.current, last), group="read")
 
-    async def _leido_servidor(self, sid: str, eid: str) -> None:
+    async def _send_read(self, rid: str, eid: str) -> None:
         try:
-            await self.mx.leido(sid, eid)
-        except (ErrorMatrix, httpx.HTTPError):
+            await self.mx.read_marker(rid, eid)
+        except (MatrixError, httpx.HTTPError):
             pass
 
     def on_app_focus(self) -> None:
-        self.enfocada = True
-        self.marcar_leido()
+        self.focused_app = True
+        self.mark_read()
 
     def on_app_blur(self) -> None:
-        self.enfocada = False
+        self.focused_app = False
 
-    # ------------------------------------------------------------------ avisos
+    # ------------------------------------------------------------------ notifications
 
-    def avisar(self, sid: str, ev: Evento) -> None:
-        if not self.cfg.avisos:
+    def notify_message(self, rid: str, ev: Event) -> None:
+        if not self.cfg.notify:
             return
-        s = self.almacen.salas.get(sid)
-        if not s or (sid == self.actual and self.enfocada):
+        r = self.store.rooms.get(rid)
+        if not r or (rid == self.current and self.focused_app):
             return
-        if not s.sin_leer and not self.almacen.menciona(ev):
-            return  # sala silenciada en el servidor
-        quien = self.almacen.nombre_usuario(ev.sender, s)
-        sala = self.almacen.nombre_sala(s)
-        titulo = quien if sala == quien else f"{quien} · {sala}"
-        if not self.cfg.avisos_texto:
-            texto = "Mensaje nuevo"
-        elif ev.msgtype in formato.ICONOS:
-            texto = formato.ICONOS[ev.msgtype] + " " + (ev.contenido.get("body") or "archivo")
+        if not r.unread and not self.store.mentions_me(ev):
+            return  # a room muted on the server
+        who = self.store.user_name(ev.sender, r)
+        room = self.store.room_name(r)
+        title = who if room == who else f"{who} · {room}"
+        if not self.cfg.notify_text:
+            text = "New message"
+        elif ev.msgtype in render.ICONS:
+            text = render.ICONS[ev.msgtype] + " " + (ev.content.get("body") or "file")
         else:
-            texto = ev.texto
+            text = ev.text
         if shutil.which("notify-send"):
-            self.run_worker(self._ejecutar("notify-send", "-a", "Pupila", "-i", "mail-message-new",
-                                           titulo, texto[:300]), group="avisos")
-        if self.cfg.campana:
+            self.run_worker(self._run("notify-send", "-a", "Pupila", "-i", "mail-message-new",
+                                      title, text[:300]), group="notifications")
+        if self.cfg.bell:
             self.bell()
 
-    async def _ejecutar(self, *cmd: str, entrada: bytes | None = None) -> tuple[int, bytes]:
+    async def _run(self, *cmd: str, stdin: bytes | None = None) -> tuple[int, bytes]:
         try:
             p = await asyncio.create_subprocess_exec(
-                *cmd, stdin=asyncio.subprocess.PIPE if entrada is not None else asyncio.subprocess.DEVNULL,
+                *cmd, stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-            out, _ = await asyncio.wait_for(p.communicate(entrada), 20)
+            out, _ = await asyncio.wait_for(p.communicate(stdin), 20)
             return p.returncode or 0, out
         except (OSError, asyncio.TimeoutError):
             return 1, b""
 
-    # ------------------------------------------------------------------ escribir y enviar
+    # ------------------------------------------------------------------ writing and sending
 
-    @on(Entrada.Changed)
-    def _escribe(self, event: Entrada.Changed) -> None:
-        if not (self.actual and self.mx):
+    @on(Composer.Changed)
+    def _composer_changed(self, event: Composer.Changed) -> None:
+        if not (self.current and self.mx):
             return
-        ahora = time.monotonic()
-        if event.text_area.text and ahora > self._escribiendo_hasta:
-            self._escribiendo_hasta = ahora + 4
-            self.run_worker(self._typing(self.actual, True), group="typing")
-        elif not event.text_area.text and self._escribiendo_hasta:
-            self._escribiendo_hasta = 0
-            self.run_worker(self._typing(self.actual, False), group="typing")
+        now = time.monotonic()
+        if event.text_area.text and now > self._typing_until:
+            self._typing_until = now + 4
+            self.run_worker(self._typing(self.current, True), group="typing")
+        elif not event.text_area.text and self._typing_until:
+            self._typing_until = 0
+            self.run_worker(self._typing(self.current, False), group="typing")
 
-    async def _typing(self, sid: str, si: bool) -> None:
+    async def _typing(self, rid: str, typing: bool) -> None:
         try:
-            await self.mx.escribiendo(sid, si)
-        except (ErrorMatrix, httpx.HTTPError):
+            await self.mx.typing(rid, typing)
+        except (MatrixError, httpx.HTTPError):
             pass
 
-    @on(Entrada.Enviar)
-    async def _enviar(self, event: Entrada.Enviar) -> None:
-        if not self.actual:
-            self.notify("Primero abre una sala.", severity="warning")
+    @on(Composer.Submitted)
+    async def _submitted(self, event: Composer.Submitted) -> None:
+        if not self.current:
+            self.notify("Open a room first.", severity="warning")
             return
-        entrada = self.query_one(Entrada)
-        texto = event.texto.rstrip()
-        entrada.clear()
-        if texto.startswith("/") and not texto.startswith("//"):
-            await self.comando(texto)
+        composer = self.query_one(Composer)
+        text = event.text.rstrip()
+        composer.clear()
+        if text.startswith("/") and not text.startswith("//"):
+            await self.command(text)
             return
-        if texto.startswith("//"):
-            texto = texto[1:]
-        await self.enviar_texto(self.actual, texto)
+        if text.startswith("//"):
+            text = text[1:]
+        await self.send_text(self.current, text)
 
-    async def enviar_texto(self, sid: str, texto: str, msgtype: str = "m.text") -> None:
-        contenido: dict = {"msgtype": msgtype, "body": texto}
-        html = formato.a_html(texto)
+    async def send_text(self, rid: str, text: str, msgtype: str = "m.text") -> None:
+        content: dict = {"msgtype": msgtype, "body": text}
+        html = render.to_html(text)
         if html:
-            contenido.update(format="org.matrix.custom.html", formatted_body=html)
-        if self.editando:
-            ev, self.editando = self.editando, None
-            self.pintar_accion()
+            content.update(format="org.matrix.custom.html", formatted_body=html)
+        if self.editing:
+            ev, self.editing = self.editing, None
+            self.paint_action()
             try:
-                await reintentar(self.mx.editar, sid, ev.event_id, contenido)
-            except (ErrorMatrix, httpx.HTTPError) as e:
-                self.notify(f"No se pudo editar: {e}", severity="error")
+                await retry(self.mx.edit, rid, ev.event_id, content)
+            except (MatrixError, httpx.HTTPError) as e:
+                self.notify(f"Couldn't edit: {e}", severity="error")
             return
-        if self.respondiendo:
-            contenido["m.relates_to"] = {"m.in_reply_to": {"event_id": self.respondiendo.event_id}}
-            self.respondiendo = None
-            self.pintar_accion()
-        await self.enviar_contenido(sid, contenido)
+        if self.replying:
+            content["m.relates_to"] = {"m.in_reply_to": {"event_id": self.replying.event_id}}
+            self.replying = None
+            self.paint_action()
+        await self.send_content(rid, content)
 
-    async def enviar_contenido(self, sid: str, contenido: dict) -> None:
+    async def send_content(self, rid: str, content: dict) -> None:
         txn = uuid.uuid4().hex
-        eco = self.almacen.eco(sid, "~" + txn, contenido, int(time.time() * 1000))
-        linea = self.query_one(Linea)
-        if sid == self.actual:
-            await linea.sincronizar()
-            linea.anchor()  # lo que envías siempre se ve
-        self._escribiendo_hasta = 0
-        self.run_worker(self._typing(sid, False), group="typing")
+        echo = self.store.echo(rid, "~" + txn, content, int(time.time() * 1000))
+        timeline = self.query_one(Timeline)
+        if rid == self.current:
+            await timeline.sync()
+            timeline.anchor()  # what you send is always in view
+        self._typing_until = 0
+        self.run_worker(self._typing(rid, False), group="typing")
         try:
-            real = await reintentar(self.mx.enviar, sid, contenido, txn=txn)
-        except (ErrorMatrix, httpx.HTTPError) as e:
-            eco.fallido = True
-            await linea.actualizar(eco.event_id)
-            self.notify(f"No se pudo enviar: {e}", severity="error")
+            real = await retry(self.mx.send, rid, content, txn=txn)
+        except (MatrixError, httpx.HTTPError) as e:
+            echo.failed = True
+            await timeline.update_event(echo.event_id)
+            self.notify(f"Couldn't send: {e}", severity="error")
             return
-        e = self.almacen.cambiar_id(sid, "~" + txn, real)
-        if sid == self.actual:
-            if e is not eco:  # el sync lo trajo antes: sobra el eco
-                await linea.quitar("~" + txn)
-            linea.reindexar()
-            await linea.actualizar(real)
-        self.marcar_leido()
+        e = self.store.rename(rid, "~" + txn, real)
+        if rid == self.current:
+            if e is not echo:  # the sync brought it first: the echo is left over
+                await timeline.remove_event("~" + txn)
+            timeline.reindex()
+            await timeline.update_event(real)
+        self.mark_read()
 
-    async def comando(self, texto: str) -> None:
-        nombre, _, resto = texto[1:].partition(" ")
-        resto = resto.strip()
-        if nombre == "me" and resto:
-            await self.enviar_texto(self.actual, resto, "m.emote")
-        elif nombre in ("subir", "upload") and resto:
-            await self.subir(Path(resto).expanduser())
-        elif nombre in ("salir", "quit"):
+    async def command(self, text: str) -> None:
+        name, _, rest = text[1:].partition(" ")
+        rest = rest.strip()
+        if name == "me" and rest:
+            await self.send_text(self.current, rest, "m.emote")
+        elif name == "upload" and rest:
+            await self.upload(Path(rest).expanduser())
+        elif name == "quit":
             self.exit()
-        elif nombre in ("ayuda", "help"):
-            self.notify("/me acción · /subir ruta · //texto envía algo que empieza con / · "
-                        "Ctrl+V pega imágenes · ↑ edita tu último mensaje · clic en un mensaje: "
-                        "responder, reaccionar, borrar…", timeout=12)
+        elif name == "help":
+            self.notify("/me action · /upload path · //text sends something starting with / · "
+                        "Ctrl+V pastes images · ↑ edits your last message · click a message: "
+                        "reply, react, delete…", timeout=12)
         else:
-            self.notify(f"No conozco /{nombre}. Prueba /ayuda (o // para enviarlo como texto).",
-                        severity="warning")
+            self.notify(f"Unknown command /{name}. Try /help (or // to send it as text).", severity="warning")
 
-    def action_cancelar(self) -> None:
-        if self.editando or self.respondiendo:
-            if self.editando:
-                self.query_one(Entrada).clear()
-            self.editando = self.respondiendo = None
-            self.pintar_accion()
-        self.query_one(Entrada).focus()
+    def action_cancel(self) -> None:
+        if self.editing or self.replying:
+            if self.editing:
+                self.query_one(Composer).clear()
+            self.editing = self.replying = None
+            self.paint_action()
+        self.query_one(Composer).focus()
 
-    @on(Entrada.EditarUltimo)
-    def _editar_ultimo(self) -> None:
-        s = self.almacen.salas.get(self.actual) if self.almacen and self.actual else None
-        if not s:
+    @on(Composer.EditLast)
+    def _edit_last(self) -> None:
+        r = self.store.rooms.get(self.current) if self.store and self.current else None
+        if not r:
             return
-        mio = next((e for e in reversed(s.eventos) if e.sender == self.almacen.yo and not e.borrado
-                    and not e.pendiente and e.msgtype in ("m.text", "m.emote", "m.notice")), None)
-        if mio:
-            self.editar(mio)
+        mine = next((e for e in reversed(r.events) if e.sender == self.store.me and not e.redacted
+                     and not e.pending and e.msgtype in ("m.text", "m.emote", "m.notice")), None)
+        if mine:
+            self.edit(mine)
 
-    def editar(self, ev: Evento) -> None:
-        self.editando, self.respondiendo = ev, None
-        entrada = self.query_one(Entrada)
-        entrada.load_text(ev.texto)
-        entrada.move_cursor(entrada.document.end)
-        entrada.focus()
-        self.pintar_accion()
+    def edit(self, ev: Event) -> None:
+        self.editing, self.replying = ev, None
+        composer = self.query_one(Composer)
+        composer.load_text(ev.text)
+        composer.move_cursor(composer.document.end)
+        composer.focus()
+        self.paint_action()
 
-    def action_responder_ultimo(self) -> None:
-        s = self.almacen.salas.get(self.actual) if self.almacen and self.actual else None
-        if not s:
+    def action_reply_last(self) -> None:
+        r = self.store.rooms.get(self.current) if self.store and self.current else None
+        if not r:
             return
-        ev = next((e for e in reversed(s.eventos) if e.sender != self.almacen.yo and not e.borrado), None)
+        ev = next((e for e in reversed(r.events) if e.sender != self.store.me and not e.redacted), None)
         if ev:
-            self.responder(ev)
+            self.reply(ev)
 
-    def responder(self, ev: Evento) -> None:
-        self.respondiendo, self.editando = ev, None
-        self.pintar_accion()
-        self.query_one(Entrada).focus()
+    def reply(self, ev: Event) -> None:
+        self.replying, self.editing = ev, None
+        self.paint_action()
+        self.query_one(Composer).focus()
 
-    # ------------------------------------------------------------------ clic en un mensaje
+    # ------------------------------------------------------------------ clicking a message
 
-    @on(Mensaje.Clic)
+    @on(MessageView.Clicked)
     @work(exclusive=True, group="menu")
-    async def _menu(self, event: Mensaje.Clic) -> None:
-        ev = event.mensaje.ev
+    async def _message_menu(self, event: MessageView.Clicked) -> None:
+        ev = event.view.ev
         if ev.event_id.startswith("~"):
             return
-        opciones = []
-        if ev.msgtype in formato.ICONOS and ev.contenido.get("url"):
-            opciones.append(("abrir", "Abrir"))
-        if not ev.borrado:
-            opciones += [("responder", "Responder"), ("reaccionar", "Reaccionar")]
-            if ev.msgtype not in formato.ICONOS:
-                opciones.append(("copiar", "Copiar texto"))
-        if ev.sender == self.almacen.yo and not ev.borrado:
+        options = []
+        if ev.msgtype in render.ICONS and ev.content.get("url"):
+            options.append(("open", "Open in a player" if ev.msgtype == "m.video" else "Open"))
+        if not ev.redacted:
+            options += [("reply", "Reply"), ("react", "React")]
+            if ev.msgtype not in render.ICONS:
+                options.append(("copy", "Copy text"))
+        if ev.sender == self.store.me and not ev.redacted:
             if ev.msgtype in ("m.text", "m.emote"):
-                opciones.append(("editar", "Editar"))
-            opciones.append(("borrar", "Borrar"))
-        if not opciones:
+                options.append(("edit", "Edit"))
+            options.append(("delete", "Delete"))
+        if not options:
             return
-        s = self.almacen.salas[self.actual]
-        titulo = f"{self.almacen.nombre_usuario(ev.sender, s)} · {formato.hora(ev.ts)}"
-        eleccion = await self.push_screen_wait(Menu(titulo, opciones))
-        if eleccion == "abrir":
-            await self.abrir_archivo(ev)
-        elif eleccion == "responder":
-            self.responder(ev)
-        elif eleccion == "reaccionar":
-            clave = await self.push_screen_wait(Reaccion())
-            if clave:
-                await self.reaccionar(ev, clave)
-        elif eleccion == "copiar":
-            await self.copiar(ev.texto)
-        elif eleccion == "editar":
-            self.editar(ev)
-        elif eleccion == "borrar":
-            if await self.push_screen_wait(Confirmar("¿Borrar este mensaje? No se puede deshacer.",
-                                                     "Borrar", "Cancelar")):
+        r = self.store.rooms[self.current]
+        title = f"{self.store.user_name(ev.sender, r)} · {render.clock(ev.ts)}"
+        choice = await self.push_screen_wait(Menu(title, options))
+        if choice == "open":
+            await self.open_file(ev, force_window=True)
+        elif choice == "reply":
+            self.reply(ev)
+        elif choice == "react":
+            key = await self.push_screen_wait(ReactionPicker())
+            if key:
+                await self.react(ev, key)
+        elif choice == "copy":
+            await self.copy(ev.text)
+        elif choice == "edit":
+            self.edit(ev)
+        elif choice == "delete":
+            if await self.push_screen_wait(Confirm("Delete this message? This can't be undone.",
+                                                   "Delete", "Cancel")):
                 try:
-                    await self.mx.borrar(self.actual, ev.event_id)
-                except (ErrorMatrix, httpx.HTTPError) as e:
-                    self.notify(f"No se pudo borrar: {e}", severity="error")
+                    await self.mx.redact(self.current, ev.event_id)
+                except (MatrixError, httpx.HTTPError) as e:
+                    self.notify(f"Couldn't delete: {e}", severity="error")
 
-    async def reaccionar(self, ev: Evento, clave: str) -> None:
-        mia = ev.reacciones.get(clave, {}).get(self.almacen.yo)
+    async def react(self, ev: Event, key: str) -> None:
+        mine = ev.reactions.get(key, {}).get(self.store.me)
         try:
-            if mia:
-                await self.mx.borrar(self.actual, mia)  # tocar la misma reacción la quita
+            if mine:
+                await self.mx.redact(self.current, mine)  # picking the same reaction removes it
             else:
-                await self.mx.reaccionar(self.actual, ev.event_id, clave)
-        except (ErrorMatrix, httpx.HTTPError) as e:
-            self.notify(f"No se pudo reaccionar: {e}", severity="error")
+                await self.mx.react(self.current, ev.event_id, key)
+        except (MatrixError, httpx.HTTPError) as e:
+            self.notify(f"Couldn't react: {e}", severity="error")
 
-    async def copiar(self, texto: str) -> None:
+    async def copy(self, text: str) -> None:
         if shutil.which("wl-copy"):
-            await self._ejecutar("wl-copy", entrada=texto.encode())
+            await self._run("wl-copy", stdin=text.encode())
         elif shutil.which("xclip"):
-            await self._ejecutar("xclip", "-selection", "clipboard", entrada=texto.encode())
+            await self._run("xclip", "-selection", "clipboard", stdin=text.encode())
         else:
-            self.copy_to_clipboard(texto)
-        self.notify("Copiado.", timeout=2)
+            self.copy_to_clipboard(text)
+        self.notify("Copied.", timeout=2)
 
-    # ------------------------------------------------------------------ archivos
+    # ------------------------------------------------------------------ files
 
-    async def imagen(self, mxc: str) -> PILImage.Image | None:
-        if mxc in self.imagenes:
-            return self.imagenes[mxc]
-        cache = config.CACHE_DIR / "miniaturas" / mxc.removeprefix("mxc://").replace("/", "_")
+    async def image(self, mxc: str) -> PILImage.Image | None:
+        if mxc in self.images:
+            return self.images[mxc]
+        cache = config.CACHE_DIR / "thumbnails" / mxc.removeprefix("mxc://").replace("/", "_")
         try:
             if cache.exists():
-                datos = cache.read_bytes()
+                data = cache.read_bytes()
             else:
-                datos = await self.mx.miniatura(mxc)
+                data = await self.mx.thumbnail(mxc)
                 cache.parent.mkdir(parents=True, exist_ok=True)
-                cache.write_bytes(datos)
-            img = PILImage.open(io.BytesIO(datos))
+                cache.write_bytes(data)
+            img = PILImage.open(io.BytesIO(data))
             img.load()
-        except Exception as e:  # imagen rota, formato raro, red
-            self.log(f"imagen {mxc}: {e}")
+        except Exception as e:  # broken image, odd format, network
+            self.log(f"image {mxc}: {e}")
             img = None
-        self.imagenes[mxc] = img
+        self.images[mxc] = img
         return img
 
-    async def descargar(self, ev: Evento) -> Path | None:
-        """El archivo completo, guardado en la caché (se descarga una sola vez)."""
-        mxc = ev.contenido.get("url", "")
-        nombre = Path(ev.contenido.get("filename") or ev.contenido.get("body") or "archivo").name
-        destino = config.CACHE_DIR / "archivos" / f"{mxc.rsplit('/', 1)[-1]}_{nombre}"
-        if not destino.exists():
+    async def download(self, ev: Event) -> Path | None:
+        """The whole file, kept in the cache (downloaded only once)."""
+        mxc = ev.content.get("url", "")
+        name = Path(ev.content.get("filename") or ev.content.get("body") or "file").name
+        dest = config.CACHE_DIR / "files" / f"{mxc.rsplit('/', 1)[-1]}_{name}"
+        if not dest.exists():
             try:
-                datos = await self.mx.bajar(mxc)
-            except (ErrorMatrix, httpx.HTTPError) as e:
-                self.log(f"descarga {mxc}: {e}")
+                data = await self.mx.download(mxc)
+            except (MatrixError, httpx.HTTPError) as e:
+                self.log(f"download {mxc}: {e}")
                 return None
-            destino.parent.mkdir(parents=True, exist_ok=True)
-            destino.write_bytes(datos)
-        return destino
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(data)
+        return dest
 
-    async def animacion(self, ev: Evento) -> list | None:
-        """Los cuadros de un GIF (o de un video-GIF de Discord/WhatsApp) para animarlo en el chat."""
-        url = ev.contenido.get("url", "")
-        if url in self.animaciones:
-            self.animaciones.move_to_end(url)
-            return self.animaciones[url]
-        if (medios.info(ev).get("size") or 0) > 20 * 1024 * 1024:
+    async def animation(self, ev: Event) -> list | None:
+        """The frames of a GIF (or of a Discord/WhatsApp video-GIF) to animate it in the chat."""
+        url = ev.content.get("url", "")
+        if url in self.animations:
+            self.animations.move_to_end(url)
+            return self.animations[url]
+        if (media.info(ev).get("size") or 0) > 20 * 1024 * 1024:
             return None
-        ruta = await self.descargar(ev)
-        if not ruta:
+        path = await self.download(ev)
+        if not path:
             return None
-        datos = ruta.read_bytes()
+        data = path.read_bytes()
         try:
             if ev.msgtype == "m.video":
-                cuadros = await medios.cuadros_video(datos)
+                frames = await media.video_frames(data)
             else:
-                cuadros = await asyncio.to_thread(medios.cuadros_gif, datos)
-        except Exception as e:  # GIF roto, video raro
-            self.log(f"animación {url}: {e}")
-            cuadros = []
-        if not cuadros:
+                frames = await asyncio.to_thread(media.gif_frames, data)
+        except Exception as e:  # broken GIF, odd video
+            self.log(f"animation {url}: {e}")
+            frames = []
+        if not frames:
             return None
-        self.animaciones[url] = cuadros
-        while len(self.animaciones) > 16:
-            self.animaciones.popitem(last=False)
-        return cuadros
+        self.animations[url] = frames
+        while len(self.animations) > 16:
+            self.animations.popitem(last=False)
+        return frames
 
-    async def miniatura_video(self, ev: Evento) -> PILImage.Image | None:
-        clave = "video:" + ev.contenido.get("url", "")
-        if clave in self.imagenes:
-            return self.imagenes[clave]
+    async def video_thumbnail(self, ev: Event) -> PILImage.Image | None:
+        key = "video:" + ev.content.get("url", "")
+        if key in self.images:
+            return self.images[key]
         img = None
-        miniatura = medios.info(ev).get("thumbnail_url")
-        if miniatura:
-            img = await self.imagen(miniatura)
-        elif (medios.info(ev).get("size") or 0) <= 25 * 1024 * 1024:
-            ruta = await self.descargar(ev)
-            if ruta:
-                img = await medios.primer_cuadro(ruta.read_bytes())
-        self.imagenes[clave] = img
+        thumb = media.info(ev).get("thumbnail_url")
+        if thumb:
+            img = await self.image(thumb)
+        elif (media.info(ev).get("size") or 0) <= 25 * 1024 * 1024:
+            path = await self.download(ev)
+            if path:
+                img = await media.first_frame(path.read_bytes())
+        self.images[key] = img
         return img
 
-    async def abrir_archivo(self, ev: Evento) -> None:
-        nombre = ev.contenido.get("filename") or ev.contenido.get("body") or "archivo"
-        self.notify(f"Abriendo {nombre}…", timeout=2)
-        ruta = await self.descargar(ev)
-        if not ruta:
-            self.notify("No se pudo descargar.", severity="error")
+    async def open_file(self, ev: Event, force_window: bool = False) -> None:
+        name = ev.content.get("filename") or ev.content.get("body") or "file"
+        self.notify(f"Opening {name}…", timeout=2)
+        path = await self.download(ev)
+        if not path:
+            self.notify("Couldn't download it.", severity="error")
             return
-        es_video = ev.msgtype == "m.video" or medios.es_animado(ev)
+        is_video = ev.msgtype == "m.video" or media.is_animated(ev)
         mpv = shutil.which("mpv")
-        if es_video and mpv:
-            bucle = ["--loop-file=inf"] if medios.es_animado(ev) else []
-            if self.cfg.reproductor == "terminal":
-                with self.suspend():  # mpv dibuja en la misma terminal; q vuelve a Pupila
-                    subprocess.run([mpv, *medios.salida_mpv(self.cfg.estilo_imagen), "--really-quiet",
-                                    *bucle, str(ruta)])
+        if is_video and mpv:
+            loop = ["--loop-file=inf"] if media.is_animated(ev) else []
+            if self.cfg.video_player == "terminal" and not force_window:
+                with self.suspend():  # mpv draws in this same terminal; q comes back to Pupila
+                    subprocess.run([mpv, *media.mpv_output(self.cfg.image_style), "--really-quiet",
+                                    *loop, str(path)])
                 return
             await asyncio.create_subprocess_exec(
-                mpv, "--force-window=immediate", "--really-quiet", *bucle, str(ruta),
+                mpv, "--force-window=immediate", "--really-quiet", *loop, str(path),
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
         elif shutil.which("xdg-open"):
-            p = await asyncio.create_subprocess_exec("xdg-open", str(ruta), stdout=asyncio.subprocess.DEVNULL,
+            p = await asyncio.create_subprocess_exec("xdg-open", str(path), stdout=asyncio.subprocess.DEVNULL,
                                                      stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
-            try:  # si en unos segundos terminó con error, es que no hay programa para ese tipo de archivo
-                fallo = await asyncio.wait_for(p.wait(), 4) != 0
+            try:  # if it failed within a few seconds, no program handles that kind of file
+                failed = await asyncio.wait_for(p.wait(), 4) != 0
             except asyncio.TimeoutError:
-                fallo = False
-            if fallo:
-                consejo = ("Instala mpv (sudo pacman -S mpv) y Pupila lo usará para los videos."
-                           if es_video else "Tu sistema no tiene un programa asociado a este tipo de archivo.")
-                self.notify(f"No hay con qué abrir {nombre}. {consejo}\nQuedó guardado en {ruta}",
+                failed = False
+            if failed:
+                advice = ("Install mpv (sudo pacman -S mpv) and Pupila will use it for videos."
+                          if is_video else "Your system has no program for this kind of file.")
+                self.notify(f"Nothing can open {name}. {advice}\nIt was saved to {path}",
                             severity="warning", timeout=12)
         else:
-            self.notify(f"Guardado en {ruta}")
+            self.notify(f"Saved to {path}")
 
-    @on(Mensaje.Abrir)
-    @work(group="abrir-archivo")
-    async def _abrir_medio(self, event: Mensaje.Abrir) -> None:
-        await self.abrir_archivo(event.mensaje.ev)
+    @on(MessageView.Open)
+    @work(group="open-file")
+    async def _open_media(self, event: MessageView.Open) -> None:
+        await self.open_file(event.view.ev)
 
-    async def subir(self, ruta: Path | None = None, datos: bytes | None = None, tipo: str | None = None,
-                    nombre: str | None = None) -> None:
-        sid = self.actual
-        if not sid:
+    async def upload(self, path: Path | None = None, data: bytes | None = None,
+                     content_type: str | None = None, name: str | None = None) -> None:
+        rid = self.current
+        if not rid:
             return
-        if ruta is not None:
-            if not ruta.is_file():
-                self.notify(f"No existe {ruta}", severity="error")
+        if path is not None:
+            if not path.is_file():
+                self.notify(f"{path} doesn't exist", severity="error")
                 return
-            datos, nombre = ruta.read_bytes(), ruta.name
-        assert datos is not None and nombre
-        tipo = tipo or mimetypes.guess_type(nombre)[0] or "application/octet-stream"
-        info: dict = {"mimetype": tipo, "size": len(datos)}
+            data, name = path.read_bytes(), path.name
+        assert data is not None and name
+        content_type = content_type or mimetypes.guess_type(name)[0] or "application/octet-stream"
+        info: dict = {"mimetype": content_type, "size": len(data)}
         msgtype = "m.file"
-        if tipo.startswith("image/"):
+        if content_type.startswith("image/"):
             msgtype = "m.image"
             try:
-                with PILImage.open(io.BytesIO(datos)) as im:
+                with PILImage.open(io.BytesIO(data)) as im:
                     info["w"], info["h"] = im.size
             except Exception:
                 pass
-        elif tipo.startswith("video/"):
+        elif content_type.startswith("video/"):
             msgtype = "m.video"
-        elif tipo.startswith("audio/"):
+        elif content_type.startswith("audio/"):
             msgtype = "m.audio"
-        self.notify(f"Subiendo {nombre} ({formato.tamano(len(datos))})…", timeout=3)
+        self.notify(f"Uploading {name} ({render.human_size(len(data))})…", timeout=3)
         try:
-            mxc = await self.mx.subir(datos, tipo, nombre)
-        except (ErrorMatrix, httpx.HTTPError) as e:
-            self.notify(f"No se pudo subir: {e}", severity="error")
+            mxc = await self.mx.upload(data, content_type, name)
+        except (MatrixError, httpx.HTTPError) as e:
+            self.notify(f"Couldn't upload: {e}", severity="error")
             return
-        contenido = {"msgtype": msgtype, "body": nombre, "filename": nombre, "url": mxc, "info": info}
+        content = {"msgtype": msgtype, "body": name, "filename": name, "url": mxc, "info": info}
         if msgtype == "m.image":
             try:
-                img = PILImage.open(io.BytesIO(datos))
+                img = PILImage.open(io.BytesIO(data))
                 img.load()
-                self.imagenes[mxc] = img
+                self.images[mxc] = img
             except Exception:
                 pass
-        await self.enviar_contenido(sid, contenido)
+        await self.send_content(rid, content)
 
-    @on(Entrada.Pegar)
-    @work(exclusive=True, group="pegar")
-    async def _pegar(self) -> None:
-        entrada = self.query_one(Entrada)
+    @on(Composer.Paste)
+    @work(exclusive=True, group="paste")
+    async def _paste(self) -> None:
+        composer = self.query_one(Composer)
         if shutil.which("wl-paste"):
-            _, tipos = await self._ejecutar("wl-paste", "--list-types")
-            imagen = next((t for t in tipos.decode(errors="replace").split() if t.startswith("image/")), None)
-            if imagen:
-                _, datos = await self._ejecutar("wl-paste", "--type", imagen)
-                if datos and await self.push_screen_wait(Confirmar(
-                        f"¿Enviar la imagen del portapapeles ({formato.tamano(len(datos))})?", "Enviar", "No")):
-                    ext = mimetypes.guess_extension(imagen) or ".png"
-                    await self.subir(datos=datos, tipo=imagen, nombre=f"imagen{ext}")
+            _, types = await self._run("wl-paste", "--list-types")
+            image = next((t for t in types.decode(errors="replace").split() if t.startswith("image/")), None)
+            if image:
+                _, data = await self._run("wl-paste", "--type", image)
+                if data and await self.push_screen_wait(Confirm(
+                        f"Send the image on the clipboard ({render.human_size(len(data))})?", "Send", "No")):
+                    ext = mimetypes.guess_extension(image) or ".png"
+                    await self.upload(data=data, content_type=image, name=f"image{ext}")
                 return
-            _, texto = await self._ejecutar("wl-paste", "--no-newline")
+            _, text = await self._run("wl-paste", "--no-newline")
         elif shutil.which("xclip"):
-            _, texto = await self._ejecutar("xclip", "-selection", "clipboard", "-o")
+            _, text = await self._run("xclip", "-selection", "clipboard", "-o")
         else:
-            self.notify("Para pegar hace falta wl-clipboard (Wayland) o xclip.", severity="warning")
+            self.notify("Pasting needs wl-clipboard (Wayland) or xclip.", severity="warning")
             return
-        if texto:
-            entrada.insert(texto.decode(errors="replace"))
+        if text:
+            composer.insert(text.decode(errors="replace"))
 
-    @on(Entrada.ArchivoSoltado)
-    @work(exclusive=True, group="pegar")
-    async def _soltado(self, event: Entrada.ArchivoSoltado) -> None:
-        r = event.ruta
-        if await self.push_screen_wait(Confirmar(
-                f"¿Enviar {r.name} ({formato.tamano(r.stat().st_size)})?", "Enviar", "No")):
-            await self.subir(r)
+    @on(Composer.FileDropped)
+    @work(exclusive=True, group="paste")
+    async def _file_dropped(self, event: Composer.FileDropped) -> None:
+        p = event.path
+        if await self.push_screen_wait(Confirm(f"Send {p.name} ({render.human_size(p.stat().st_size)})?",
+                                               "Send", "No")):
+            await self.upload(p)

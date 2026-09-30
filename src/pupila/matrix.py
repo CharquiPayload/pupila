@@ -1,7 +1,7 @@
-"""Cliente mínimo de la API cliente-servidor de Matrix (sin cifrado).
+"""A minimal client for the Matrix client-server API (no encryption).
 
-Solo lo que usa Pupila: entrar, sincronizar, enviar, editar, borrar, reaccionar,
-subir y bajar archivos, "escribiendo" y marcas de lectura.
+Only what Pupila needs: log in, sync, send, edit, redact, react, upload and download
+files, typing notices and read markers.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import httpx
 API = "/_matrix/client/v3"
 MEDIA = "/_matrix/client/v1/media"
 
-FILTRO = {
+FILTER = {
     "room": {
         "state": {"lazy_load_members": True},
         "timeline": {"limit": 25, "lazy_load_members": True},
@@ -27,7 +27,7 @@ FILTRO = {
 }
 
 
-class ErrorMatrix(Exception):
+class MatrixError(Exception):
     def __init__(self, status: int, errcode: str, error: str):
         super().__init__(f"{status} {errcode}: {error}")
         self.status, self.errcode, self.error = status, errcode, error
@@ -37,9 +37,9 @@ def q(s: str) -> str:
     return quote(s, safe="")
 
 
-def partes_mxc(mxc: str) -> tuple[str, str]:
-    servidor, _, media_id = mxc.removeprefix("mxc://").partition("/")
-    return servidor, media_id
+def mxc_parts(mxc: str) -> tuple[str, str]:
+    server, _, media_id = mxc.removeprefix("mxc://").partition("/")
+    return server, media_id
 
 
 class Matrix:
@@ -50,133 +50,133 @@ class Matrix:
         self.http = httpx.AsyncClient(timeout=httpx.Timeout(40, connect=10),
                                       headers={"User-Agent": "Pupila"})
 
-    async def cerrar(self) -> None:
+    async def close(self) -> None:
         await self.http.aclose()
 
-    async def _pedir(self, metodo: str, ruta: str, *, json_: Any = None, params: dict | None = None,
-                     contenido: bytes | None = None, tipo: str | None = None,
-                     timeout: float | None = None, crudo: bool = False) -> Any:
-        cabeceras = {}
+    async def _request(self, method: str, path: str, *, json_: Any = None, params: dict | None = None,
+                       content: bytes | None = None, content_type: str | None = None,
+                       timeout: float | None = None, raw: bool = False) -> Any:
+        headers = {}
         if self.token:
-            cabeceras["Authorization"] = f"Bearer {self.token}"
-        if tipo:
-            cabeceras["Content-Type"] = tipo
+            headers["Authorization"] = f"Bearer {self.token}"
+        if content_type:
+            headers["Content-Type"] = content_type
         extra = {"timeout": httpx.Timeout(timeout, connect=10)} if timeout else {}
-        r = await self.http.request(metodo, self.homeserver + ruta, json=json_, params=params,
-                                    content=contenido, headers=cabeceras, **extra)
+        r = await self.http.request(method, self.homeserver + path, json=json_, params=params,
+                                    content=content, headers=headers, **extra)
         if r.status_code >= 400:
             try:
                 d = r.json()
             except ValueError:
                 d = {}
-            raise ErrorMatrix(r.status_code, d.get("errcode", "?"), d.get("error", r.text[:200]))
-        return r.content if crudo else (r.json() if r.content else {})
+            raise MatrixError(r.status_code, d.get("errcode", "?"), d.get("error", r.text[:200]))
+        return r.content if raw else (r.json() if r.content else {})
 
-    # --- sesión ---
+    # --- session ---
 
-    async def entrar(self, usuario: str, clave: str, dispositivo: str) -> dict:
-        d = await self._pedir("POST", f"{API}/login", json_={
+    async def login(self, user: str, password: str, device_name: str) -> dict:
+        d = await self._request("POST", f"{API}/login", json_={
             "type": "m.login.password",
-            "identifier": {"type": "m.id.user", "user": usuario},
-            "password": clave,
-            "initial_device_display_name": dispositivo,
+            "identifier": {"type": "m.id.user", "user": user},
+            "password": password,
+            "initial_device_display_name": device_name,
         })
         self.token, self.user_id, self.device_id = d["access_token"], d["user_id"], d.get("device_id")
         return d
 
-    async def salir(self) -> None:
-        await self._pedir("POST", f"{API}/logout", json_={})
+    async def logout(self) -> None:
+        await self._request("POST", f"{API}/logout", json_={})
         self.token = None
 
-    async def quien_soy(self) -> dict:
-        return await self._pedir("GET", f"{API}/account/whoami")
+    async def whoami(self) -> dict:
+        return await self._request("GET", f"{API}/account/whoami")
 
-    # --- sincronización ---
+    # --- sync ---
 
-    async def sync(self, desde: str | None, espera_ms: int = 30000) -> dict:
-        params = {"filter": json.dumps(FILTRO, separators=(",", ":")), "timeout": str(espera_ms),
+    async def sync(self, since: str | None, timeout_ms: int = 30000) -> dict:
+        params = {"filter": json.dumps(FILTER, separators=(",", ":")), "timeout": str(timeout_ms),
                   "set_presence": "online"}
-        if desde:
-            params["since"] = desde
+        if since:
+            params["since"] = since
         else:
             params["timeout"] = "0"
-        return await self._pedir("GET", f"{API}/sync", params=params, timeout=espera_ms / 1000 + 30)
+        return await self._request("GET", f"{API}/sync", params=params, timeout=timeout_ms / 1000 + 30)
 
-    async def mensajes(self, sala: str, desde: str, limite: int = 30) -> dict:
-        return await self._pedir("GET", f"{API}/rooms/{q(sala)}/messages", params={
-            "from": desde, "dir": "b", "limit": str(limite),
+    async def messages(self, room: str, start: str, limit: int = 30) -> dict:
+        return await self._request("GET", f"{API}/rooms/{q(room)}/messages", params={
+            "from": start, "dir": "b", "limit": str(limit),
             "filter": json.dumps({"lazy_load_members": True}),
         })
 
-    async def perfil(self, usuario: str) -> dict:
-        return await self._pedir("GET", f"{API}/profile/{q(usuario)}")
+    async def profile(self, user: str) -> dict:
+        return await self._request("GET", f"{API}/profile/{q(user)}")
 
-    # --- enviar ---
+    # --- sending ---
 
-    async def enviar(self, sala: str, contenido: dict, tipo: str = "m.room.message",
-                     txn: str | None = None) -> str:
+    async def send(self, room: str, content: dict, event_type: str = "m.room.message",
+                   txn: str | None = None) -> str:
         txn = txn or uuid.uuid4().hex
-        d = await self._pedir("PUT", f"{API}/rooms/{q(sala)}/send/{q(tipo)}/{txn}", json_=contenido)
+        d = await self._request("PUT", f"{API}/rooms/{q(room)}/send/{q(event_type)}/{txn}", json_=content)
         return d["event_id"]
 
-    async def editar(self, sala: str, evento: str, nuevo: dict) -> str:
-        cuerpo = dict(nuevo)
-        cuerpo["m.new_content"] = dict(nuevo)
-        cuerpo["body"] = "* " + nuevo.get("body", "")
-        if "formatted_body" in nuevo:
-            cuerpo["formatted_body"] = "* " + nuevo["formatted_body"]
-        cuerpo["m.relates_to"] = {"rel_type": "m.replace", "event_id": evento}
-        return await self.enviar(sala, cuerpo)
+    async def edit(self, room: str, event_id: str, new: dict) -> str:
+        body = dict(new)
+        body["m.new_content"] = dict(new)
+        body["body"] = "* " + new.get("body", "")
+        if "formatted_body" in new:
+            body["formatted_body"] = "* " + new["formatted_body"]
+        body["m.relates_to"] = {"rel_type": "m.replace", "event_id": event_id}
+        return await self.send(room, body)
 
-    async def borrar(self, sala: str, evento: str, motivo: str | None = None) -> None:
-        await self._pedir("PUT", f"{API}/rooms/{q(sala)}/redact/{q(evento)}/{uuid.uuid4().hex}",
-                          json_={"reason": motivo} if motivo else {})
+    async def redact(self, room: str, event_id: str, reason: str | None = None) -> None:
+        await self._request("PUT", f"{API}/rooms/{q(room)}/redact/{q(event_id)}/{uuid.uuid4().hex}",
+                            json_={"reason": reason} if reason else {})
 
-    async def reaccionar(self, sala: str, evento: str, clave: str) -> str:
-        return await self.enviar(sala, {"m.relates_to": {
-            "rel_type": "m.annotation", "event_id": evento, "key": clave}}, tipo="m.reaction")
+    async def react(self, room: str, event_id: str, key: str) -> str:
+        return await self.send(room, {"m.relates_to": {
+            "rel_type": "m.annotation", "event_id": event_id, "key": key}}, event_type="m.reaction")
 
-    async def escribiendo(self, sala: str, si: bool, ms: int = 6000) -> None:
-        cuerpo = {"typing": si, "timeout": ms} if si else {"typing": False}
-        await self._pedir("PUT", f"{API}/rooms/{q(sala)}/typing/{q(self.user_id)}", json_=cuerpo)
+    async def typing(self, room: str, typing: bool, ms: int = 6000) -> None:
+        body = {"typing": typing, "timeout": ms} if typing else {"typing": False}
+        await self._request("PUT", f"{API}/rooms/{q(room)}/typing/{q(self.user_id)}", json_=body)
 
-    async def leido(self, sala: str, evento: str) -> None:
-        await self._pedir("POST", f"{API}/rooms/{q(sala)}/read_markers",
-                          json_={"m.fully_read": evento, "m.read": evento})
+    async def read_marker(self, room: str, event_id: str) -> None:
+        await self._request("POST", f"{API}/rooms/{q(room)}/read_markers",
+                            json_={"m.fully_read": event_id, "m.read": event_id})
 
-    async def unirse(self, sala: str) -> dict:
-        return await self._pedir("POST", f"{API}/join/{q(sala)}", json_={})
+    async def join(self, room: str) -> dict:
+        return await self._request("POST", f"{API}/join/{q(room)}", json_={})
 
-    async def rechazar(self, sala: str) -> None:
-        await self._pedir("POST", f"{API}/rooms/{q(sala)}/leave", json_={})
+    async def leave(self, room: str) -> None:
+        await self._request("POST", f"{API}/rooms/{q(room)}/leave", json_={})
 
-    # --- archivos ---
+    # --- files ---
 
-    async def subir(self, datos: bytes, tipo: str, nombre: str) -> str:
-        d = await self._pedir("POST", "/_matrix/media/v3/upload", params={"filename": nombre},
-                              contenido=datos, tipo=tipo, timeout=300)
+    async def upload(self, data: bytes, content_type: str, filename: str) -> str:
+        d = await self._request("POST", "/_matrix/media/v3/upload", params={"filename": filename},
+                                content=data, content_type=content_type, timeout=300)
         return d["content_uri"]
 
-    async def bajar(self, mxc: str) -> bytes:
-        servidor, media_id = partes_mxc(mxc)
-        return await self._pedir("GET", f"{MEDIA}/download/{q(servidor)}/{q(media_id)}",
-                                 timeout=300, crudo=True)
+    async def download(self, mxc: str) -> bytes:
+        server, media_id = mxc_parts(mxc)
+        return await self._request("GET", f"{MEDIA}/download/{q(server)}/{q(media_id)}",
+                                   timeout=300, raw=True)
 
-    async def miniatura(self, mxc: str, ancho: int = 640, alto: int = 480) -> bytes:
-        servidor, media_id = partes_mxc(mxc)
+    async def thumbnail(self, mxc: str, width: int = 640, height: int = 480) -> bytes:
+        server, media_id = mxc_parts(mxc)
         try:
-            return await self._pedir("GET", f"{MEDIA}/thumbnail/{q(servidor)}/{q(media_id)}", params={
-                "width": str(ancho), "height": str(alto), "method": "scale"}, timeout=60, crudo=True)
-        except ErrorMatrix:
-            return await self.bajar(mxc)
+            return await self._request("GET", f"{MEDIA}/thumbnail/{q(server)}/{q(media_id)}", params={
+                "width": str(width), "height": str(height), "method": "scale"}, timeout=60, raw=True)
+        except MatrixError:
+            return await self.download(mxc)
 
 
-async def reintentar(fn, *args, intentos: int = 3, **kw):
-    """Para envíos: reintenta errores de red, no los de Matrix."""
-    for i in range(intentos):
+async def retry(fn, *args, attempts: int = 3, **kw):
+    """For sends: retries network errors, not Matrix errors."""
+    for i in range(attempts):
         try:
             return await fn(*args, **kw)
         except (httpx.TransportError, httpx.TimeoutException):
-            if i == intentos - 1:
+            if i == attempts - 1:
                 raise
             await asyncio.sleep(1.5 * (i + 1))
